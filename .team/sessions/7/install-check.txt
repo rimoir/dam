@@ -1,0 +1,106 @@
+# claude
+command: HOME=clean claude --version; plugin list; plugin details
+2.1.332 (Claude Code)
+Installed plugins:
+
+  ❯ superpowers@superpowers-dev
+    Version: 7.0.2
+    Scope: user
+    Status: ✔ enabled
+
+Built-in plugins:
+
+  ❯ cc-plugin-agents-md@builtin
+    Status: ✔ enabled
+
+  ❯ cc-plugin-plugin-authoring@builtin
+    Status: ✔ enabled
+
+  ❯ cc-plugin-privacy@builtin
+    Status: ✔ enabled
+
+  ❯ cc-plugin-telemetry@builtin
+    Status: ✔ enabled
+
+list_exit:0
+superpowers 7.0.2
+  Description: Core skills library for Claude Code: TDD, debugging, collaboration patterns, and proven techniques
+  Source: superpowers@superpowers-dev
+
+Component inventory
+  Skills (15)  brainstorming, diagnosing-superpowers, dispatching-parallel-agents, executing-plans, finishing-a-development-branch, receiving-code-review, requesting-code-review, subagent-driven-development, systematic-debugging, test-driven-development, using-git-worktrees, using-superpowers, verification-before-completion, writing-plans, writing-skills
+  Agents (0)
+  Hooks (1)  SessionStart  (harness-only - no model context cost)
+  MCP servers (0)
+  LSP servers (0)
+
+Projected token cost
+  Always-on:   ~706 tok   added to every session
+
+Per-component (rounded)
+  component                       always-on  on-invoke
+  executing-plans                       ~50      ~4.5k
+  subagent-driven-development           ~30      ~4.9k
+  systematic-debugging                  ~30      ~2.3k
+  using-superpowers                     ~50       ~750
+  test-driven-development               ~30      ~2.4k
+  finishing-a-development-branch        ~40      ~1.9k
+  writing-plans                         ~30      ~2.6k
+  verification-before-completion        ~70       ~830
+  brainstorming                         ~60      ~3.7k
+  requesting-code-review                ~40       ~700
+  diagnosing-superpowers               ~100      ~1.6k
+  using-git-worktrees                   ~60      ~1.6k
+  receiving-code-review                 ~70      ~1.5k
+  writing-skills                        ~30      ~4.1k
+  dispatching-parallel-agents           ~40      ~1.5k
+
+  On-invoke cost is paid each time a skill or agent fires.
+  Token counts are estimates and may differ from actual usage.
+details_exit:0
+
+# codex
+command: CODEX_HOME=clean codex --version; plugin list --json; git describe
+codex-cli 0.172.0
+{
+  "installed": [
+    {
+      "pluginId": "superpowers@superpowers-dev",
+      "name": "superpowers",
+      "marketplaceName": "superpowers-dev",
+      "version": "7.0.2",
+      "installed": true,
+      "enabled": true,
+      "source": {
+        "source": "git",
+        "url": "/tmp/clean-codex/.codex/.tmp/marketplaces/superpowers-dev"
+      },
+      "marketplaceSource": {
+        "sourceType": "git",
+        "source": "https://github.com/obra/superpowers.git"
+      },
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_INSTALL"
+    }
+  ],
+  "available": []
+}
+list_exit:0
+22f0b463e7a5e579904dd6211a520321035526f7
+v7.0.2
+skills:
+brainstorming
+diagnosing-superpowers
+dispatching-parallel-agents
+executing-plans
+finishing-a-development-branch
+receiving-code-review
+requesting-code-review
+subagent-driven-development
+systematic-debugging
+test-driven-development
+using-git-worktrees
+using-superpowers
+verification-before-completion
+writing-plans
+writing-skills
