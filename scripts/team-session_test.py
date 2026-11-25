@@ -80,6 +80,16 @@ class NewSessionTest(unittest.TestCase):
         self.assertNotEqual(bad.returncode, 0)
         self.assertFalse((self.root / "outside").exists())
 
+    def test_log_line_names_the_tool(self) -> None:
+        result = run(self.root, "new", "15")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        log = (self.root / ".team" / "sessions" / "15" / "log.md").read_text(encoding="utf-8")
+        self.assertIn("YYYY-MM-DDTHH:MM:SSZ", log)
+        self.assertIn("Claude Code", log)
+        self.assertIn("Codex", log)
+        for kind in ("시작", "go", "종료", "push", "재개"):
+            self.assertIn(kind, log)
+
     def test_summary_is_state_only_and_within_limit(self) -> None:
         created = run(self.root, "new", "14")
         self.assertEqual(created.returncode, 0, created.stderr)
