@@ -1,0 +1,18 @@
+same_after_rerun yes
+files
+.team/board.md
+.team/sessions/12/log.md
+.team/sessions/12/result.md
+.team/sessions/12/state.md
+.team/sessions/12/task.md
+.team/sessions/13/log.md
+.team/sessions/13/result.md
+.team/sessions/13/state.md
+.team/sessions/13/task.md
+board
+# 작업 현황
+
+한 줄 형식: `- <작업ID>: 상태 <상태>, 담당 <세션>, 막힘 <이유>`
+
+- 12: 상태 시작, 담당 dev, 막힘 없음
+- 13: 상태 시작, 담당 other, 막힘 없음

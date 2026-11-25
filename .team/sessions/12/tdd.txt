@@ -1,0 +1,44 @@
+# 생성기 검사
+
+실패 (scripts/team-session.py 가 없을 때):
+
+FFF
+======================================================================
+FAIL: test_date_id_is_accepted_and_escape_is_rejected (__main__.NewSessionTest.test_date_id_is_accepted_and_escape_is_rejected)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scripts/team-session_test.py", line 78, in test_date_id_is_accepted_and_escape_is_rejected
+    self.assertEqual(ok.returncode, 0, ok.stderr)
+AssertionError: 2 != 0 : python3: can't open file '/workspace/scripts/team-session.py': [Errno 2] No such file or directory
+
+
+======================================================================
+FAIL: test_new_writes_four_notes_and_one_board_line (__main__.NewSessionTest.test_new_writes_four_notes_and_one_board_line)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scripts/team-session_test.py", line 37, in test_new_writes_four_notes_and_one_board_line
+    self.assertEqual(result.returncode, 0, result.stderr)
+AssertionError: 2 != 0 : python3: can't open file '/workspace/scripts/team-session.py': [Errno 2] No such file or directory
+
+
+======================================================================
+FAIL: test_second_work_does_not_clobber_the_first (__main__.NewSessionTest.test_second_work_does_not_clobber_the_first)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scripts/team-session_test.py", line 63, in test_second_work_does_not_clobber_the_first
+    self.assertEqual(first.returncode, 0, first.stderr)
+AssertionError: 2 != 0 : python3: can't open file '/workspace/scripts/team-session.py': [Errno 2] No such file or directory
+
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.029s
+
+FAILED (failures=3)
+
+통과 (구현 뒤):
+
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.120s
+
+OK
