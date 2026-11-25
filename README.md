@@ -59,3 +59,11 @@ codex plugin list --json
 `plugin list`의 `version`이 `7.0.2`여야 한다. 설치 캐시의 `skills/`에 `brainstorming`, `writing-plans`가 있다.
 
 텔레메트리: 사용자 `~/.codex/config.toml`에 `analytics.enabled = false`를 두면 내장 Statsig 지표가 꺼진다. 명시적 OTLP까지 끄려면 `otel.metrics_exporter = "none"`을 둔다. 프로젝트 로컬 설정은 텔레메트리 키를 무시한다 (https://developers.openai.com/codex/config-reference). superpowers 쪽은 `SUPERPOWERS_DISABLE_TELEMETRY=1`이다.
+
+작업 노트는 훅 없이 이어간다. Codex CLI `0.172.0`은 세션을 열 때 저장소 루트의 `AGENTS.md`를 읽는다. `.codex/hooks.json`은 두지 않는다.
+
+```bash
+codex
+```
+
+저장소 루트에서 위 명령으로 연다. 열린 작업은 `.team/board.md`와 그 작업의 `state.md`를 읽고, log.md 한 줄의 도구 칸에는 `Codex`를 적는다. 새 작업은 `python3 scripts/team-session.py new <작업ID>`다.

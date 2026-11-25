@@ -52,8 +52,10 @@ def templates(work_id: str) -> dict[str, str]:
         ),
         "log.md": (
             f"# 로그 {work_id}\n\n"
-            "한 줄 형식: `YYYY-MM-DDTHH:MM:SSZ 종류 내용`\n\n"
-            "종류는 시작, go, 종료, push, 재개 중 하나다.\n"
+            "한 줄 형식: `YYYY-MM-DDTHH:MM:SSZ 도구 종류 내용`\n\n"
+            "도구는 `Claude Code` 또는 `Codex`다.\n"
+            "종류는 시작, go, 종료, push, 재개 중 하나다.\n\n"
+            "예: `2026-11-26T00:00:00Z Codex go 계획 승인`\n"
         ),
         "result.md": (
             f"# 결과 {work_id}\n\n"

@@ -1,0 +1,13 @@
+F
+======================================================================
+FAIL: test_log_line_names_the_tool (__main__.NewSessionTest.test_log_line_names_the_tool)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scripts/team-session_test.py", line 88, in test_log_line_names_the_tool
+    self.assertIn("Claude Code", log)
+AssertionError: 'Claude Code' not found in '# 로그 15\n\n한 줄 형식: `YYYY-MM-DDTHH:MM:SSZ 종류 내용`\n\n종류는 시작, go, 종료, push, 재개 중 하나다.\n'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.025s
+
+FAILED (failures=1)
