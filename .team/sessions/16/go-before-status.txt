@@ -1,0 +1,6 @@
+git status --short
+?? .team/
+
+scripts diff empty: yes
+log has Codex: yes
+log has go: yes

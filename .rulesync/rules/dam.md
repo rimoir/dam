@@ -28,3 +28,6 @@ globs: ["**/*"]
 - 첫 답변은 열린 작업 이름과 state.md의 다음 할 일을 말한다.
 - 재개도 위와 같은 log.md 한 줄이다. 도구 칸에 `Claude Code` 또는 `Codex`를 적는다.
 - 세션 시작 요약은 `python3 scripts/team-session.py summary <작업ID>` 출력이다. state.md만 나오고, 10,000자를 넘기면 실패한다 (https://github.com/rimoir/dam/issues/2).
+- Codex에서 새 작업을 시작할 때도 `python3 scripts/team-session.py new <작업ID>`를 쓴다. Codex 전용 생성기는 없다.
+- Codex도 계획을 task.md에 쓴 뒤 사람의 go를 기다린다. go 전에는 `git status`로 코드 파일이 바뀌지 않았는지 확인한다. 그 go 줄의 도구 칸은 `Codex`다.
+- Codex가 남기는 state.md와 log.md는 Claude Code와 같은 칸이다 (https://github.com/rimoir/dam/issues/3).
