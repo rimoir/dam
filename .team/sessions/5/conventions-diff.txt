@@ -1,0 +1,8 @@
+--- /tmp/team-conventions.md	2026-11-25 12:45:59.133238571 +0000
++++ /workspace/docs/conventions.md	2026-11-25 12:46:08.444978644 +0000
+@@ -1,3 +1,5 @@
++> 이 파일이 이제 팀 규칙의 원본이다. team-conventions 스킬은 이 파일을 따라 맞춘다.
++
+ # Team conventions
+ 
+ Shared rules for the PM bot, the dev bot, and the research bot on one repo.
