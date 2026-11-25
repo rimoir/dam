@@ -1,0 +1,17 @@
+# vendor check
+
+## byte diff against cursor/plugins 9e278fe4d4ecd8bfe98b1b79bf4be662efb338cc
+command: diff -ru for LICENSE, sharpen, in-your-own-words, why
+license_diff_exit:0
+sharpen_diff_exit:0
+words_diff_exit:0
+why_diff_exit:0
+
+## principle references in the three skill bodies
+command: rg -n -i principle on the three skill directories
+principle_rg_exit:1
+
+## forbidden skill directories
+command: find vendor/pstack -type d ( -name how -o -name swarm -o -name arena )
+find_exit:0
+absent_exit:0
