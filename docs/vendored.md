@@ -31,7 +31,7 @@
 - `pstack/LICENSE` 저작권은 Copyright (c) 2026 Lauren Tan. 원문은 `vendor/pstack/LICENSE`. 출처 SHA는 `vendor/pstack/SOURCE_SHA`.
 - 복사한 파일은 `skills/sharpen/SKILL.md`, `skills/in-your-own-words/SKILL.md`, `skills/why/SKILL.md`뿐이다. 원본과 `diff -ru` 출력이 없고 exit 0이다. 기록은 `.team/sessions/6/vendor-check.txt`.
 - 세 스킬 본문에서 `principle`을 찾지 못했다. 가리키는 principle 스킬이 없어 원칙 파일은 복사하지 않았다.
-- `why` 본문은 런타임 동작을 `how` 스킬로 보라고 적는다. AC6이 `how`, `swarm`, `arena`를 빼라고 해서 그 디렉터리는 복사하지 않았다. `find`로 그 이름 디렉터리는 0개다.
+- `why` 본문은 런타임 동작을 `how` 스킬로 보라고 적는다. 벤더에는 `how`, `swarm`, `arena`를 넣지 않는다 (https://github.com/rimoir/dam/issues/1). `find`로 그 이름 디렉터리는 0개다.
 
 ## groundcrew
 
