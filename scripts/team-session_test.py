@@ -80,6 +80,28 @@ class NewSessionTest(unittest.TestCase):
         self.assertNotEqual(bad.returncode, 0)
         self.assertFalse((self.root / "outside").exists())
 
+    def test_summary_is_state_only_and_within_limit(self) -> None:
+        created = run(self.root, "new", "14")
+        self.assertEqual(created.returncode, 0, created.stderr)
+        state = self.root / ".team" / "sessions" / "14" / "state.md"
+        state.write_text("다음 할 일\n계획을 쓴다\n", encoding="utf-8")
+        log = self.root / ".team" / "sessions" / "14" / "log.md"
+        log.write_text("로그전문-MARKER\n", encoding="utf-8")
+        result = run(self.root, "summary", "14")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "다음 할 일\n계획을 쓴다\n")
+        self.assertNotIn("로그전문-MARKER", result.stdout)
+        self.assertLessEqual(len(result.stdout), 10000)
+
+    def test_summary_fails_when_state_exceeds_limit(self) -> None:
+        created = run(self.root, "new", "14")
+        self.assertEqual(created.returncode, 0, created.stderr)
+        state = self.root / ".team" / "sessions" / "14" / "state.md"
+        state.write_text("가" * 10001, encoding="utf-8")
+        result = run(self.root, "summary", "14")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("10000", result.stderr)
+
     def test_parallel_new_keeps_both_board_lines(self) -> None:
         env = os.environ.copy()
         for i in range(25):

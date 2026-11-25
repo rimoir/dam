@@ -107,15 +107,35 @@ def create_session(root: Path, work_id: str, session: str) -> None:
     ensure_board(root, work_id, session)
 
 
+LIMIT = 10000
+
+
+def summary_text(root: Path, work_id: str) -> str:
+    if not valid_work_id(work_id):
+        raise SystemExit(f"작업ID 형식이 아니다: {work_id}")
+    path = root / ".team" / "sessions" / work_id / "state.md"
+    if not path.is_file():
+        raise SystemExit(f"state.md가 없다: {work_id}")
+    text = path.read_text(encoding="utf-8")
+    if len(text) > LIMIT:
+        raise SystemExit(f"세션 시작 요약이 {LIMIT}자를 넘는다: {len(text)}")
+    return text
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="작업 노트 폴더를 만든다.")
     sub = parser.add_subparsers(dest="command", required=True)
     new = sub.add_parser("new", help="네 노트와 board 한 줄을 만든다.")
     new.add_argument("work_id")
     new.add_argument("--session", default="미정")
+    summary = sub.add_parser("summary", help="세션 시작 요약으로 state.md만 출력한다.")
+    summary.add_argument("work_id")
     args = parser.parse_args(argv)
+    root = repo_root()
     if args.command == "new":
-        create_session(repo_root(), args.work_id, args.session)
+        create_session(root, args.work_id, args.session)
+    elif args.command == "summary":
+        sys.stdout.write(summary_text(root, args.work_id))
     return 0
 
 

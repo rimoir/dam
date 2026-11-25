@@ -1,0 +1,6 @@
+unchanged_first_task yes
+board lines 2
+summary_eq_state True
+summary_len 84
+contains_full_log False
+under_10000 True

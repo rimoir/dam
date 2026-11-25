@@ -17,3 +17,7 @@
 - 작업 단위가 끝날 때마다 state.md의 지금 상태, 결정, 다음 할 일을 갱신한다.
 - 작업이 끝나면 result.md의 결과와 교훈 후보를 채운다.
 - 완료 조건을 가리킬 때 번호나 별칭을 쓰지 않는다. 조건 내용을 짧게 쓰고 에픽 링크를 붙인다. 예: /compact 뒤 첫 답에서 재개 한 줄 (https://github.com/rimoir/dam/issues/2).
+- 세션을 시작하거나 compact 뒤에는 `.team/board.md`와 열린 작업의 state.md만 읽는다. log.md 전체를 시작 컨텍스트에 넣지 않는다.
+- 첫 답변은 열린 작업 이름과 state.md의 다음 할 일을 말한다.
+- 재개는 log.md에 `YYYY-MM-DDTHH:MM:SSZ` 시각과 함께 한 줄로 남긴다.
+- 세션 시작 요약은 `python3 scripts/team-session.py summary <작업ID>` 출력이다. state.md만 나오고, 10,000자를 넘기면 실패한다 (https://github.com/rimoir/dam/issues/2).
