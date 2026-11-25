@@ -1,0 +1,23 @@
+...FF
+======================================================================
+FAIL: test_summary_fails_when_state_exceeds_limit (__main__.NewSessionTest.test_summary_fails_when_state_exceeds_limit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/dam-14/scripts/team-session_test.py", line 103, in test_summary_fails_when_state_exceeds_limit
+    self.assertIn("10000", result.stderr)
+AssertionError: '10000' not found in "usage: team-session.py [-h] {new} ...\nteam-session.py: error: argument command: invalid choice: 'summary' (choose from 'new')\n"
+
+======================================================================
+FAIL: test_summary_is_state_only_and_within_limit (__main__.NewSessionTest.test_summary_is_state_only_and_within_limit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/dam-14/scripts/team-session_test.py", line 91, in test_summary_is_state_only_and_within_limit
+    self.assertEqual(result.returncode, 0, result.stderr)
+AssertionError: 2 != 0 : usage: team-session.py [-h] {new} ...
+team-session.py: error: argument command: invalid choice: 'summary' (choose from 'new')
+
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.210s
+
+FAILED (failures=2)
