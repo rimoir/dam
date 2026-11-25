@@ -1,0 +1,3 @@
+rulesync 43.14.0 generate --targets claudecode,codexcli
+second run hash diff empty
+CLAUDE.md and AGENTS.md identical
