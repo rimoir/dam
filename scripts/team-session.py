@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import re
 import sys
 from pathlib import Path
@@ -70,23 +71,25 @@ def board_line(work_id: str, session: str) -> str:
 
 def ensure_board(root: Path, work_id: str, session: str) -> None:
     path = root / ".team" / "board.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
     line = board_line(work_id, session)
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            "# 작업 현황\n\n"
-            "한 줄 형식: `- <작업ID>: 상태 <상태>, 담당 <세션>, 막힘 <이유>`\n\n"
-            + line,
-            encoding="utf-8",
-        )
-        return
-    text = path.read_text(encoding="utf-8")
-    marker = f"\n- {work_id}:"
-    if text.startswith(f"- {work_id}:") or marker in text:
-        return
-    if not text.endswith("\n"):
-        text += "\n"
-    path.write_text(text + line, encoding="utf-8")
+    header = (
+        "# 작업 현황\n\n"
+        "한 줄 형식: `- <작업ID>: 상태 <상태>, 담당 <세션>, 막힘 <이유>`\n\n"
+    )
+    with path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        handle.seek(0)
+        text = handle.read()
+        marker = f"\n- {work_id}:"
+        if text.startswith(f"- {work_id}:") or marker in text:
+            return
+        if not text:
+            handle.write(header)
+        elif not text.endswith("\n"):
+            handle.write("\n")
+        handle.write(line)
+        handle.flush()
 
 
 def create_session(root: Path, work_id: str, session: str) -> None:
