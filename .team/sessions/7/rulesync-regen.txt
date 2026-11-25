@@ -1,0 +1,6 @@
+# rulesync regen
+command: rulesync 43.14.0 generate --targets claudecode,codexcli
+43.14.0
+✓ All files are up to date (rules)
+generate_exit:0
+diff_exit:0
