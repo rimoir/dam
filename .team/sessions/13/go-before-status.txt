@@ -1,0 +1,4 @@
+git status --short
+?? .team/
+
+scripts diff empty: yes
