@@ -24,3 +24,6 @@
 - Codex에서 새 작업을 시작할 때도 `python3 scripts/team-session.py new <작업ID>`를 쓴다. Codex 전용 생성기는 없다.
 - Codex도 계획을 task.md에 쓴 뒤 사람의 go를 기다린다. go 전에는 `git status`로 코드 파일이 바뀌지 않았는지 확인한다. 그 go 줄의 도구 칸은 `Codex`다.
 - Codex가 남기는 state.md와 log.md는 Claude Code와 같은 칸이다 (https://github.com/rimoir/dam/issues/3).
+- Codex를 열면 `.team/board.md`와 열린 작업의 state.md를 읽고, 첫 답에 작업 이름과 state.md의 다음 할 일을 말한다. 재개 줄의 도구는 `Codex`다.
+- 그 다음 Claude Code로 다시 열어도 같다. 첫 답은 작업 이름과 state.md의 다음 할 일이다. 재개 줄의 도구는 `Claude Code`다.
+- 이 이어받기는 README의 Codex 절만으로 된다. 훅 파일을 추가하지 않는다 (https://github.com/rimoir/dam/issues/3).

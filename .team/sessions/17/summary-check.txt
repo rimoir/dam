@@ -1,0 +1,4 @@
+summary_eq_state yes
+summary_len 84
+under_10000 yes
+no_hooks_file yes
