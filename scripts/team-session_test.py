@@ -80,6 +80,34 @@ class NewSessionTest(unittest.TestCase):
         self.assertNotEqual(bad.returncode, 0)
         self.assertFalse((self.root / "outside").exists())
 
+    def test_parallel_new_keeps_both_board_lines(self) -> None:
+        env = os.environ.copy()
+        for i in range(25):
+            root = self.root / f"try{i}"
+            root.mkdir()
+            env["TEAM_ROOT"] = str(root)
+            first = subprocess.Popen(
+                ["python3", str(SCRIPT), "new", "12", "--session", "s12"],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            second = subprocess.Popen(
+                ["python3", str(SCRIPT), "new", "13", "--session", "s13"],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            err1 = first.communicate()[1]
+            err2 = second.communicate()[1]
+            self.assertEqual(first.returncode, 0, err1)
+            self.assertEqual(second.returncode, 0, err2)
+            board = (root / ".team" / "board.md").read_text(encoding="utf-8")
+            self.assertEqual(board.count("\n- 12:"), 1, board)
+            self.assertEqual(board.count("\n- 13:"), 1, board)
+
 
 if __name__ == "__main__":
     unittest.main()
