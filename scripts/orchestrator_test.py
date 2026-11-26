@@ -358,5 +358,120 @@ class GateTest(unittest.TestCase):
         self.assertTrue(parse_record(started.stdout)["handle"].startswith("native-"))
 
 
+def init_repo(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=path, check=True)
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", "빈 커밋", "-q"],
+        cwd=path,
+        check=True,
+        capture_output=True,
+    )
+
+
+class PrepareTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.box = Path(self.tmp.name)
+        self.repo = self.box / "dam"
+        init_repo(self.repo)
+        install_fake_gh(self.repo)
+
+    def tearDown(self) -> None:
+        subprocess.run(
+            ["git", "-C", str(self.repo), "worktree", "list", "--porcelain"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        for path in self.box.glob("dam-*"):
+            subprocess.run(
+                ["git", "-C", str(self.repo), "worktree", "remove", "--force", str(path)],
+                check=False,
+                capture_output=True,
+            )
+        subprocess.run(
+            ["git", "-C", str(self.repo), "branch", "-D", "worker/74", "worker/75"],
+            check=False,
+            capture_output=True,
+        )
+        self.tmp.cleanup()
+
+    def test_prepare_makes_notes_branch_and_worktree(self) -> None:
+        module = load_module(SCRIPT, "orchestrator_prepare")
+        record = module.prepare_unit(self.repo, "74", "cursor")
+        self.assertEqual(record["ok"], "예")
+        self.assertEqual(record["handle"], "worker/74")
+        worktree = self.repo.parent / "dam-74"
+        self.assertTrue(worktree.is_dir())
+        self.assertTrue((self.repo / ".team" / "sessions" / "74" / "task.md").is_file())
+        self.assertTrue((self.repo / ".team" / "sessions" / "74" / "state.md").is_file())
+        state = (self.repo / ".team" / "sessions" / "74" / "state.md").read_text(encoding="utf-8")
+        self.assertIn("작업 폴더 생성:", state)
+        branches = subprocess.run(
+            ["git", "-C", str(self.repo), "branch", "--list", "worker/74"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("worker/74", branches.stdout)
+        dam_branches = subprocess.run(
+            ["git", "-C", str(ROOT), "branch", "--list", "worker/74"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(dam_branches.stdout.strip(), "")
+
+    def test_existing_worktree_is_not_overwritten(self) -> None:
+        module = load_module(SCRIPT, "orchestrator_prepare_again")
+        first = module.prepare_unit(self.repo, "74", "cursor")
+        self.assertEqual(first["ok"], "예")
+        task = self.repo / ".team" / "sessions" / "74" / "task.md"
+        task.write_text(task.read_text(encoding="utf-8") + "\n손글씨\n", encoding="utf-8")
+        before = task.read_bytes()
+        marker = self.repo.parent / "dam-74" / "keep.txt"
+        marker.write_text("그대로\n", encoding="utf-8")
+        second = module.prepare_unit(self.repo, "74", "cursor")
+        self.assertEqual(second["ok"], "아니오")
+        self.assertIn("이미", second["reason"])
+        self.assertEqual(task.read_bytes(), before)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "그대로\n")
+
+    def test_worker_reads_only_its_task_and_state(self) -> None:
+        module = load_module(SCRIPT, "orchestrator_brief")
+        self.assertEqual(module.prepare_unit(self.repo, "74", "cursor")["ok"], "예")
+        self.assertEqual(module.prepare_unit(self.repo, "75", "cursor")["ok"], "예")
+        folder = self.repo / ".team" / "sessions" / "74"
+        (folder / "log.md").write_text("LOG-SECRET-74\n", encoding="utf-8")
+        (folder / "result.md").write_text("RESULT-SECRET-74\n", encoding="utf-8")
+        other = self.repo / ".team" / "sessions" / "75" / "task.md"
+        other.write_text("OTHER-SECRET-75\n", encoding="utf-8")
+        brief = module.worker_brief(self.repo, "74")
+        self.assertIn("task.md", brief)
+        self.assertIn("state.md", brief)
+        self.assertNotIn("LOG-SECRET-74", brief)
+        self.assertNotIn("RESULT-SECRET-74", brief)
+        self.assertNotIn("OTHER-SECRET-75", brief)
+        target = self.repo.parent / "dam-75" / "nope.txt"
+        refused = module.guarded_write(self.repo.parent / "dam-74", "../dam-75/nope.txt", "침범\n")
+        self.assertEqual(refused["ok"], "아니오")
+        self.assertFalse(target.exists())
+
+    def test_cli_prepare_prints_branch_and_time(self) -> None:
+        done = run_orch(self.repo, "prepare", "--work", "74", "--session", "cursor")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        parsed = parse_record(done.stdout)
+        self.assertEqual(parsed["handle"], "worker/74")
+        self.assertEqual(parsed["ok"], "예")
+        state = (self.repo / ".team" / "sessions" / "74" / "state.md").read_text(encoding="utf-8")
+        self.assertIn("작업 폴더 생성:", state)
+        brief = run_orch(self.repo, "brief", "--work", "74")
+        self.assertEqual(brief.returncode, 0, brief.stderr)
+        self.assertNotIn("LOG-SECRET", brief.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
