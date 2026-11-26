@@ -1,0 +1,22 @@
+python3 scripts/team-session_test.py
+Ran 7 tests
+OK
+python_exit: 0
+
+rulesync --version
+43.14.0
+rulesync generate --targets claudecode,codexcli
+All files are up to date (rules)
+git diff --exit-code -- CLAUDE.md AGENTS.md
+rulesync_diff_exit: 0
+
+gitleaks version
+8.30.1
+gitleaks detect --source . --no-git -v
+no leaks found
+gitleaks_tree_exit: 0
+
+gitleaks detect --source . --log-opts="origin/main..HEAD" -v
+1 commits scanned
+no leaks found
+range_exit: 0
