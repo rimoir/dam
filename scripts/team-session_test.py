@@ -1112,6 +1112,11 @@ class ModeDeclarationTest(unittest.TestCase):
         for line in examples:
             self.assertIn("기본값", line)
             self.assertIn("질문 한 번", line)
+        self.assertIn("한두 파일, 접근이 뻔함, 새 의존 없음", adr)
+        self.assertIn("세 파일 이상", adr)
+        self.assertIn("끝나면 원래 모드로", adr)
+        self.assertIn("알아보고 고쳐 줘", adr)
+        self.assertNotIn("기능은 그리되 코드는 넣지 말라", adr)
 
 
 if __name__ == "__main__":
