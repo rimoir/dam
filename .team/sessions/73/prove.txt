@@ -1,0 +1,41 @@
+$ python3 scripts/orchestrator.py admit --work 73 --running 0
+ok: 아니오
+handle: 
+state: 거부
+line: 
+reason: go 없는 작업이다
+exit:1
+store False
+$ python3 scripts/orchestrator.py admit --work 73 --running 0
+ok: 아니오
+handle: 
+state: 거부
+line: 
+reason: 건드릴 파일이 겹친다: scripts/a.py
+exit:1
+$ python3 scripts/orchestrator.py admit --work 73 --running 0
+ok: 아니오
+handle: 
+state: 거부
+line: 
+reason: 앞 단위 결과가 입력이다: 읽기
+exit:1
+$ python3 scripts/orchestrator.py admit --work 73 --running 0 --unit 쓰기 --finished 읽기
+ok: 예
+handle: 
+state: 허용
+line: 쓰기
+reason: 
+$ python3 scripts/orchestrator.py admit --work 73 --running 3
+ok: 아니오
+handle: 
+state: 거부
+line: 
+reason: 동시 워커 상한 3을 넘는다
+exit:1
+$ python3 scripts/orchestrator.py start --work 73 --running 0
+ok: 예
+handle: native-1,native-2
+state: 허용
+line: 읽기 쓰기
+reason: 

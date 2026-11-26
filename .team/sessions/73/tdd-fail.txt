@@ -1,0 +1,4 @@
+실패 검사 커밋 3a975142667a571b8619284c1ff1012c70b63bf4
+python3 scripts/orchestrator_test.py
+Ran 13 tests FAILED (failures=1, errors=5)
+admit_work 없음, WORKER_LIMIT 없음, admit 은 invalid choice

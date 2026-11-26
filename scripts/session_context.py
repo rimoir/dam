@@ -295,6 +295,19 @@ def _has_go(log_text: str) -> bool:
     return False
 
 
+def read_plan_units(text: str) -> tuple[tuple[str, str, str, str], ...]:
+    found: list[tuple[str, str, str, str]] = []
+    for raw in _plan_section(text).splitlines():
+        fields = _plan_fields(raw)
+        if fields is not None:
+            found.append(fields)
+    return tuple(found)
+
+
+def log_has_go(text: str) -> bool:
+    return _has_go(text)
+
+
 def plan_check(root: Path, work_id: str) -> tuple[list[str], str]:
     if WORK_ID.fullmatch(work_id) is None:
         return [f"작업ID가 이슈 번호가 아니다: {work_id}"], ""
