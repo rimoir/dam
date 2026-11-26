@@ -674,6 +674,38 @@ class ParallelBoardTest(unittest.TestCase):
         self.assertEqual(after, before)
         self.assertNotIn("TASK-SECRET", after)
 
+    def test_parallel_keeps_a_closed_github_clause(self) -> None:
+        folder = self.root / ".team" / "sessions" / "76"
+        folder.mkdir(parents=True)
+        (folder / "log.md").write_text(
+            "2026-11-26T01:02:03Z Codex 시작 작업\n",
+            encoding="utf-8",
+        )
+        (folder / "state.md").write_text("# 상태 76\n\n## 지금 상태\n\n시작\n", encoding="utf-8")
+        (self.root / ".team" / "sessions" / "77").mkdir(parents=True)
+        board = self.root / ".team" / "board.md"
+        board.write_text(
+            "# 작업 현황\n\n"
+            "- 76: 상태 시작, 담당 cursor, 막힘 없음, GitHub 닫힘\n"
+            "- 77: 상태 시작, 담당 cursor, 막힘 없음, GitHub 검토 중, 검사 통과\n",
+            encoding="utf-8",
+        )
+        context = load_module(ROOT / "scripts" / "session_context.py", "session_context_closed")
+        before = context.render_start_context(self.root, "main")
+        self.assertIn("열린 줄 1", before)
+        self.assertNotIn("- 76:", before)
+        done = run_orch(self.root, "parallel", "--work", "76")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        text = board.read_text(encoding="utf-8")
+        self.assertIn("마지막 로그 2026-11-26T01:02:03Z", text)
+        self.assertTrue(
+            text.splitlines()[2].endswith("GitHub 닫힘"),
+            text,
+        )
+        after = context.render_start_context(self.root, "main")
+        self.assertIn("열린 줄 1", after)
+        self.assertNotIn("- 76:", after)
+
     def test_many_parallel_lines_become_one_short_line(self) -> None:
         context = load_module(ROOT / "scripts" / "session_context.py", "session_context_many")
         lines = [
