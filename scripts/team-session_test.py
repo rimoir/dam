@@ -1129,8 +1129,12 @@ class SmallFixRuleTest(unittest.TestCase):
         self.assertLessEqual(len(rule.splitlines()), 50)
         for name in ("AGENTS.md", "CLAUDE.md"):
             generated = (ROOT / name).read_text(encoding="utf-8")
+            self.assertIn("계획 한 줄", generated)
             self.assertIn("워커를 띄우지 않는다", generated)
             self.assertIn("모드: 작은 수정 (이유: 파일 1곳)", generated)
+            self.assertIn("세 파일 이상이면 기능", generated)
+        adr = (ROOT / "docs/adr/0008-mode-declaration.md").read_text(encoding="utf-8")
+        self.assertIn("모드: 작은 수정 (이유: 파일 1곳)", adr)
 
 
 if __name__ == "__main__":
