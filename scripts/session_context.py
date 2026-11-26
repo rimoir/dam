@@ -165,13 +165,38 @@ def set_mode(root: Path, branch: str, name: str) -> str:
     return f"모드: {name}\n"
 
 
-def _status_path(line: str) -> str:
+def _unquote_git_path(body: str) -> str:
+    text = body.strip()
+    if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+        inner = text[1:-1]
+        return inner.replace('\\"', '"').replace("\\\\", "\\")
+    return text
+
+
+def _porcelain_paths(line: str) -> list[str]:
+    if len(line) < 4:
+        return []
     body = line[3:]
-    if " -> " in body:
-        body = body.split(" -> ", 1)[1]
-    if len(body) >= 2 and body.startswith('"') and body.endswith('"'):
-        body = body[1:-1]
-    return body
+    parts: list[str] = []
+    current: list[str] = []
+    quoted = False
+    index = 0
+    while index < len(body):
+        char = body[index]
+        if char == '"':
+            quoted = not quoted
+            current.append(char)
+            index += 1
+            continue
+        if not quoted and body.startswith(" -> ", index):
+            parts.append("".join(current))
+            current = []
+            index += 4
+            continue
+        current.append(char)
+        index += 1
+    parts.append("".join(current))
+    return [_unquote_git_path(part) for part in parts if part.strip()]
 
 
 def code_dirty_paths(root: Path) -> list[str]:
@@ -190,10 +215,10 @@ def code_dirty_paths(root: Path) -> list[str]:
     for line in done.stdout.splitlines():
         if len(line) < 4:
             continue
-        path = _status_path(line)
-        if path == ".team" or path.startswith(".team/"):
-            continue
-        found.append(path)
+        for path in _porcelain_paths(line):
+            if path == ".team" or path.startswith(".team/"):
+                continue
+            found.append(path)
     return found
 
 
@@ -213,7 +238,6 @@ def append_result(root: Path, branch: str, text: str) -> bool:
 
 
 PLAN_SCREEN = 40
-_PLAN_ROW = re.compile(r"^-\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*$")
 
 
 def _named_section(text: str, heading: str) -> str:
@@ -237,16 +261,42 @@ def _plan_section(text: str) -> str:
     return _named_section(text, "## 계획")
 
 
+def _plan_path(piece: str) -> str:
+    text = piece.strip().replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    return text
+
+
+def _plan_fields(line: str) -> tuple[str, str, str, str] | None:
+    text = line.strip()
+    if text[:1] in "-*":
+        text = text[1:].strip()
+    if "|" not in text:
+        return None
+    parts = [part.strip() for part in text.split("|")]
+    while len(parts) < 4:
+        parts.append("")
+    return parts[0], parts[1], parts[2], parts[3]
+
+
+def _log_kind(parts: list[str]) -> str:
+    if len(parts) >= 4 and parts[1] == "Claude" and parts[2] == "Code":
+        return parts[3]
+    if len(parts) >= 3 and parts[1] == "Codex":
+        return parts[2]
+    return ""
+
+
 def _has_go(log_text: str) -> bool:
     for line in log_text.splitlines():
-        parts = line.split()
-        if len(parts) >= 3 and parts[2] == "go":
+        if _log_kind(line.split()) == "go":
             return True
     return False
 
 
 def plan_check(root: Path, work_id: str) -> tuple[list[str], str]:
-    if re.fullmatch(r"[0-9]+", work_id) is None:
+    if WORK_ID.fullmatch(work_id) is None:
         return [f"작업ID가 이슈 번호가 아니다: {work_id}"], ""
     task = root / ".team" / "sessions" / work_id / "task.md"
     if not task.is_file():
@@ -258,14 +308,10 @@ def plan_check(root: Path, work_id: str) -> tuple[list[str], str]:
     allowed: set[str] = set()
     found = 0
     for raw in section.splitlines():
-        line = raw.strip()
-        if "|" not in line or not line.startswith("-"):
+        fields = _plan_fields(raw)
+        if fields is None:
             continue
-        match = _PLAN_ROW.match(line)
-        if match is None:
-            errors.append(f"계획 줄 형식이 아니다: {line}")
-            continue
-        name, dep, files, check = (part.strip() for part in match.groups())
+        name, dep, files, check = fields
         found += 1
         label = name or "(이름 없음)"
         for field, value in (("단위", name), ("의존", dep), ("파일", files), ("검증", check)):
@@ -273,18 +319,24 @@ def plan_check(root: Path, work_id: str) -> tuple[list[str], str]:
                 errors.append(f"{label}의 {field}이 없다")
         for piece in files.replace(",", " ").split():
             if piece:
-                allowed.add(piece)
+                allowed.add(_plan_path(piece))
     if found == 0:
         errors.append("계획 단위가 없다")
     for raw in outside.splitlines():
         line = raw.strip()
-        match = _PLAN_ROW.match(line) if line.startswith("-") else None
-        if match is None:
+        if not line:
             continue
-        name = match.group(1).strip() or "(이름 없음)"
+        fields = _plan_fields(line)
+        if fields is not None:
+            name = fields[0] or "(이름 없음)"
+        elif line[:1] in "-*":
+            name = line[1:].strip() or "(이름 없음)"
+        else:
+            name = line
         errors.append(f"계획 밖 단위다: {name}")
     notices: list[str] = []
-    if len(section.splitlines()) > PLAN_SCREEN:
+    content = [line for line in section.splitlines() if line.strip()]
+    if len(content) > PLAN_SCREEN:
         notices.append("계획이 한 화면을 넘었다. 계획을 줄여라.")
     log_path = root / ".team" / "sessions" / work_id / "log.md"
     log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
@@ -293,7 +345,7 @@ def plan_check(root: Path, work_id: str) -> tuple[list[str], str]:
             errors.append(f"go 전에 코드가 바뀌었다: {path}")
     elif allowed:
         for path in code_dirty_paths(root):
-            if path not in allowed and not path.startswith(".team/"):
+            if _plan_path(path) not in allowed and not path.startswith(".team/"):
                 notices.append(f"파일 목록 밖이다: {path}")
     notice = "".join(item + "\n" for item in notices)
     return errors, notice
@@ -310,49 +362,56 @@ def _state_for_open_work(root: Path, branch: str) -> Path:
     return state
 
 
+def _mode_token(value: str) -> str:
+    text = value.strip()
+    for name in sorted(MODES, key=len, reverse=True):
+        if text == name or text.startswith(name + " ") or text.startswith(name + "("):
+            return name
+    return ""
+
+
 def begin_resume(root: Path, branch: str) -> str:
     state = _state_for_open_work(root, branch)
     first, ending, rest = _split_first_line(state.read_bytes())
     current = first.decode("utf-8")
     previous = current.split(":", 1)[1].strip() if current.startswith("모드:") else ""
-    if previous == "이어받기":
-        state.write_bytes(f"모드: 이어받기".encode("utf-8") + ending + rest)
+    marker_prefix = "이전 모드:".encode("utf-8")
+    if previous == "이어받기" and rest.startswith(marker_prefix):
+        state.write_bytes("모드: 이어받기".encode("utf-8") + ending + rest)
         return "모드: 이어받기\n"
     marker = f"이전 모드: {previous}".encode("utf-8")
-    rest_text = rest
-    if rest.startswith("이전 모드:".encode("utf-8")):
-        _old, old_end, rest_text = _split_first_line(rest)
-        ending_keep = old_end or ending
-        rest = rest_text
-        ending = ending_keep
-    state.write_bytes(
-        "모드: 이어받기".encode("utf-8") + ending + marker + ending + rest
-    )
+    if rest.startswith(marker_prefix):
+        _old, old_end, rest = _split_first_line(rest)
+        ending = old_end or ending
+    state.write_bytes("모드: 이어받기".encode("utf-8") + ending + marker + ending + rest)
     return "모드: 이어받기\n"
 
 
 def end_resume(root: Path, branch: str) -> str:
     state = _state_for_open_work(root, branch)
-    raw = state.read_bytes()
-    lines = []
-    blob = raw
+    found = False
     previous = ""
+    kept: list[bytes] = []
+    blob = state.read_bytes()
     while blob:
         line, ending, blob = _split_first_line(blob)
         text = line.decode("utf-8")
-        if text.startswith("이전 모드:") and not previous:
+        if text.startswith("이전 모드:") and not found:
+            found = True
             previous = text.split(":", 1)[1].strip()
             continue
-        lines.append(line + (ending if blob or ending == b"\n" or ending == b"\r\n" else b""))
-        if not blob and not ending:
-            break
+        kept.append(line + ending)
         if not blob:
             break
-    if not previous:
+    if not found:
         raise SystemExit("이전 모드가 없다")
-    # rebuild without the previous-mode line, preserving endings already in lines
-    state.write_bytes(b"".join(lines) if lines else b"")
-    return set_mode(root, branch, previous)
+    if previous and _mode_token(previous) == "":
+        raise SystemExit(f"모드 이름이 아니다: {previous}")
+    restored = "모드:" if previous == "" else f"모드: {previous}"
+    body = b"".join(kept)
+    _first, ending, rest = _split_first_line(body)
+    state.write_bytes(restored.encode("utf-8") + (ending or b"\n") + rest)
+    return f"{restored}\n"
 
 
 def text_line_errors(root: Path) -> list[str]:
