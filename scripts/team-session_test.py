@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """team-session 생성기의 실패 우선 검사."""
 
+import fcntl
 import importlib.util
 import json
 import os
@@ -704,6 +705,312 @@ class PullLogTest(unittest.TestCase):
         self.assertEqual(created.returncode, 0, created.stderr)
         viewed = (self.root / "gh.log").read_text(encoding="utf-8")
         self.assertNotIn("pr create", viewed)
+
+
+def install_board_gh(root: Path) -> Path:
+    bindir = root / "boardbin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    script = bindir / "gh"
+    script.write_text(
+        """#!/usr/bin/env python3
+import json
+import os
+import sys
+
+log_path = os.environ.get("GH_LOG")
+if log_path:
+    with open(log_path, "a", encoding="utf-8") as handle:
+        handle.write(" ".join(sys.argv[1:]) + "\\n")
+if os.environ.get("GH_FAIL"):
+    sys.stderr.write(os.environ["GH_FAIL"])
+    if not os.environ["GH_FAIL"].endswith("\\n"):
+        sys.stderr.write("\\n")
+    sys.exit(1)
+spec = json.load(open(os.environ["GH_SPEC"], encoding="utf-8"))
+args = sys.argv[1:]
+if len(args) >= 3 and args[0] == "issue" and args[1] == "view":
+    item = spec["issues"].get(args[2])
+    if item is None:
+        sys.stderr.write("issue missing\\n")
+        sys.exit(1)
+    json.dump(item, sys.stdout)
+    sys.exit(0)
+if len(args) >= 2 and args[0] == "pr" and args[1] == "list":
+    json.dump(spec.get("prs", []), sys.stdout)
+    sys.exit(0)
+if len(args) >= 3 and args[0] == "pr" and args[1] == "checks":
+    if args[2] in spec.get("nochecks", []):
+        sys.stderr.write("no checks reported on the 'topic' branch\\n")
+        sys.exit(1)
+    json.dump(spec.get("checks", {}).get(args[2], []), sys.stdout)
+    sys.exit(0)
+sys.stderr.write("거절된 gh 호출\\n")
+sys.exit(3)
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return bindir
+
+
+def board_cmd(root: Path, spec: dict | None = None, gh_fail: str | None = None) -> subprocess.CompletedProcess[str]:
+    bindir = install_board_gh(root)
+    if spec is not None:
+        (root / "gh-spec.json").write_text(json.dumps(spec), encoding="utf-8")
+    env = os.environ.copy()
+    env["TEAM_ROOT"] = str(root)
+    env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+    env["GH_LOG"] = str(root / "gh.log")
+    env["GH_SPEC"] = str(root / "gh-spec.json")
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.pop("GH_FAIL", None)
+    if gh_fail is not None:
+        env["GH_FAIL"] = gh_fail
+    return subprocess.run(
+        ["python3", str(SCRIPT), "board"],
+        cwd=root,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+
+class BoardRefreshTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        team = self.root / ".team"
+        team.mkdir()
+        self.board = team / "board.md"
+        self.board.write_text(
+            "# 작업 현황\n\n"
+            "- 31: 상태 시작, 담당 dev, 막힘 없음\n"
+            "- 30: 상태 시작, 담당 dev, 막힘 없음\n"
+            "- 2026-11-26-memo: 상태 시작, 담당 dev, 막힘 없음\n",
+            encoding="utf-8",
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_refresh_shows_review_checks_done_and_closed(self) -> None:
+        spec = {
+            "issues": {"31": {"state": "OPEN"}, "30": {"state": "CLOSED"}},
+            "prs": [
+                {
+                    "number": 7,
+                    "state": "OPEN",
+                    "body": "https://github.com/rimoir/dam/issues/31",
+                    "closingIssuesReferences": [{"number": 31}],
+                }
+            ],
+            "checks": {
+                "7": [
+                    {"name": "python test", "bucket": "pass"},
+                    {"name": "gitleaks", "bucket": "pass"},
+                ]
+            },
+        }
+        result = board_cmd(self.root, spec)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = self.board.read_text(encoding="utf-8")
+        self.assertIn("- 31: 상태 시작, 담당 dev, 막힘 없음, GitHub 검토 중, 검사 통과\n", text)
+        self.assertIn("- 30: 상태 시작, 담당 dev, 막힘 없음, GitHub 닫힘\n", text)
+        self.assertIn("- 2026-11-26-memo: 상태 시작, 담당 dev, 막힘 없음\n", text)
+        self.assertNotIn("GitHub 검토 중, 검사 통과, GitHub", text)
+        log = (self.root / "gh.log").read_text(encoding="utf-8")
+        for banned in ("pr create", "issue comment", "issue close", "issue edit"):
+            self.assertNotIn(banned, log)
+
+    def test_failed_check_and_pending_and_merged(self) -> None:
+        spec = {
+            "issues": {
+                "31": {"state": "OPEN"},
+                "12": {"state": "OPEN"},
+                "13": {"state": "OPEN"},
+            },
+            "prs": [
+                {"number": 8, "state": "OPEN", "body": "", "closingIssuesReferences": [{"number": 31}]},
+                {"number": 9, "state": "OPEN", "body": "Closes #12", "closingIssuesReferences": []},
+                {"number": 10, "state": "MERGED", "body": "", "closingIssuesReferences": [{"number": 13}]},
+            ],
+            "checks": {
+                "8": [{"name": "python test", "bucket": "fail"}],
+                "9": [{"name": "python test", "bucket": "pending"}],
+            },
+        }
+        self.board.write_text(
+            "- 31: 상태 시작, 담당 dev, 막힘 없음\n"
+            "- 12: 상태 시작, 담당 dev, 막힘 스펙\n"
+            "- 13: 상태 시작, 담당 dev, 막힘 없음\n",
+            encoding="utf-8",
+        )
+        result = board_cmd(self.root, spec)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = self.board.read_text(encoding="utf-8")
+        self.assertIn("막힘 없음, GitHub 검토 중, 검사 실패", text)
+        self.assertIn("막힘 스펙, GitHub 검토 중, 검사 아직 안 돎", text)
+        self.assertIn("- 13: 상태 시작, 담당 dev, 막힘 없음, GitHub 완료\n", text)
+
+    def test_fake_tracker_matches_board_text(self) -> None:
+        session = load_module(SCRIPT, "team_session_board")
+        view = session.WorkView(issue_closed=False, pull_state="open", checks="pass")
+
+        class Fake:
+            def read_status(self, number: int):
+                self.number = number
+                return view
+
+        only = self.root / "fake"
+        team = only / ".team"
+        team.mkdir(parents=True)
+        board = team / "board.md"
+        board.write_text("- 31: 상태 시작, 담당 dev, 막힘 없음\n", encoding="utf-8")
+        session.refresh_board(only, Fake())
+        via_fake = board.read_text(encoding="utf-8")
+        self.board.write_text("- 31: 상태 시작, 담당 dev, 막힘 없음\n", encoding="utf-8")
+        spec = {
+            "issues": {"31": {"state": "OPEN"}},
+            "prs": [{"number": 7, "state": "OPEN", "body": "", "closingIssuesReferences": [{"number": 31}]}],
+            "checks": {"7": [{"name": "python test", "bucket": "pass"}]},
+        }
+        result = board_cmd(self.root, spec)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(via_fake, self.board.read_text(encoding="utf-8"))
+
+    def test_refresh_failure_keeps_the_board(self) -> None:
+        before = self.board.read_bytes()
+        result = board_cmd(self.root, {"issues": {}, "prs": [], "checks": {}}, gh_fail="gh auth login")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("읽지 못했다", result.stderr)
+        self.assertEqual(self.board.read_bytes(), before)
+
+    def test_second_refresh_replaces_the_github_clause(self) -> None:
+        spec = {
+            "issues": {"31": {"state": "OPEN"}, "30": {"state": "OPEN"}},
+            "prs": [{"number": 7, "state": "OPEN", "body": "", "closingIssuesReferences": [{"number": 31}]}],
+            "checks": {"7": [{"name": "python test", "bucket": "pass"}]},
+        }
+        first = board_cmd(self.root, spec)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        spec["issues"]["31"] = {"state": "CLOSED"}
+        (self.root / "gh-spec.json").write_text(json.dumps(spec), encoding="utf-8")
+        second = board_cmd(self.root, spec)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        text = self.board.read_text(encoding="utf-8")
+        self.assertIn("- 31: 상태 시작, 담당 dev, 막힘 없음, GitHub 닫힘\n", text)
+        self.assertEqual(text.count("GitHub"), 2)
+        self.assertNotIn("검토 중", text)
+
+    def test_closes_keyword_is_the_pull_and_epic_url_is_not(self) -> None:
+        self.board.write_text(
+            "- 32: 상태 시작, 담당 dev, 막힘 없음\n"
+            "- 4: 상태 진행, 담당 팀, 막힘 없음\n",
+            encoding="utf-8",
+        )
+        spec = {
+            "issues": {
+                "32": {"state": "OPEN", "closedByPullRequestsReferences": []},
+                "4": {"state": "OPEN", "closedByPullRequestsReferences": []},
+            },
+            "prs": [
+                {
+                    "number": 48,
+                    "state": "OPEN",
+                    "body": "Closes #32\n\n에픽: https://github.com/rimoir/dam/issues/4\n",
+                    "closingIssuesReferences": [],
+                }
+            ],
+            "checks": {"48": [{"name": "python test", "bucket": "pass"}]},
+        }
+        result = board_cmd(self.root, spec)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = self.board.read_text(encoding="utf-8")
+        self.assertIn("- 32: 상태 시작, 담당 dev, 막힘 없음, GitHub 검토 중, 검사 통과\n", text)
+        self.assertIn("- 4: 상태 진행, 담당 팀, 막힘 없음, GitHub 열림\n", text)
+
+    def test_no_checks_reported_is_not_run_yet(self) -> None:
+        self.board.write_text(
+            "- 31: 상태 시작, 담당 dev, 막힘 없음\n"
+            "- 32: 상태 계획, 담당 사람, 막힘 스펙\n",
+            encoding="utf-8",
+        )
+        spec = {
+            "issues": {
+                "31": {"state": "OPEN", "closedByPullRequestsReferences": []},
+                "32": {"state": "OPEN", "closedByPullRequestsReferences": []},
+            },
+            "prs": [
+                {"number": 8, "state": "OPEN", "body": "Closes #31", "closingIssuesReferences": []},
+                {"number": 9, "state": "OPEN", "body": "Closes #32", "closingIssuesReferences": []},
+            ],
+            "checks": {},
+            "nochecks": ["8", "9"],
+        }
+        result = board_cmd(self.root, spec)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = self.board.read_text(encoding="utf-8")
+        self.assertIn("GitHub 검토 중, 검사 아직 안 돎", text)
+        self.assertEqual(text.count("아직 안 돎"), 2)
+
+    def test_refresh_keeps_a_line_added_while_it_reads(self) -> None:
+        self.board.write_text("- 31: 상태 시작, 담당 dev, 막힘 없음\n", encoding="utf-8")
+        bindir = self.root / "slowbin"
+        bindir.mkdir()
+        script = bindir / "gh"
+        script.write_text(
+            """#!/usr/bin/env python3
+import json, sys, time
+args = sys.argv[1:]
+if args[:2] == ["issue", "view"]:
+    time.sleep(0.4)
+    json.dump({"state": "OPEN", "closedByPullRequestsReferences": []}, sys.stdout)
+    sys.exit(0)
+if args[:2] == ["pr", "list"]:
+    json.dump([], sys.stdout)
+    sys.exit(0)
+sys.stderr.write("거절된 gh 호출\\n")
+sys.exit(3)
+""",
+            encoding="utf-8",
+        )
+        script.chmod(0o755)
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        proc = subprocess.Popen(
+            ["python3", str(SCRIPT), "board"],
+            cwd=self.root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        def add_line() -> None:
+            import time
+
+            time.sleep(0.15)
+            with self.board.open("a+", encoding="utf-8") as handle:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                handle.seek(0)
+                text = handle.read()
+                if "- 99:" not in text:
+                    if text and not text.endswith("\n"):
+                        handle.write("\n")
+                    handle.write("- 99: 상태 시작, 담당 qa, 막힘 없음\n")
+
+        import threading
+
+        worker = threading.Thread(target=add_line)
+        worker.start()
+        stderr = proc.communicate()[1]
+        worker.join()
+        self.assertEqual(proc.returncode, 0, stderr)
+        text = self.board.read_text(encoding="utf-8")
+        self.assertIn("GitHub 열림", text)
+        self.assertIn("- 99: 상태 시작, 담당 qa, 막힘 없음", text)
 
 
 if __name__ == "__main__":

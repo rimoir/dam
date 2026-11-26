@@ -80,6 +80,12 @@ PR은 사람이 명령할 때만 연다. 본문에 이슈 링크가 들어가고
 python3 scripts/team-session.py pull <이슈번호> --title "<제목>" --tool Codex
 ```
 
+현황판 갱신은 읽기만 한다. 상태, 담당, 막힘 칸은 유지하고, GitHub 상태와 검사 결과를 뒤에 붙인다. 실패하면 기존 줄은 그대로다.
+
+```bash
+python3 scripts/team-session.py board
+```
+
 ## 검사
 
 main으로 가는 pull request와 main push에서 같은 검사 세 개가 돈다. 로컬에서도 같은 명령을 쓴다. Node.js는 `22.22.0` 이상이다.
