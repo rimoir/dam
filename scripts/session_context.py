@@ -216,11 +216,11 @@ PLAN_SCREEN = 40
 _PLAN_ROW = re.compile(r"^-\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*$")
 
 
-def _plan_section(text: str) -> str:
+def _named_section(text: str, heading: str) -> str:
     lines = text.splitlines()
     start = None
     for index, line in enumerate(lines):
-        if line.strip() == "## 계획":
+        if line.strip() == heading:
             start = index + 1
             break
     if start is None:
@@ -231,6 +231,10 @@ def _plan_section(text: str) -> str:
             end = index
             break
     return "\n".join(lines[start:end])
+
+
+def _plan_section(text: str) -> str:
+    return _named_section(text, "## 계획")
 
 
 def _has_go(log_text: str) -> bool:
@@ -247,8 +251,11 @@ def plan_check(root: Path, work_id: str) -> tuple[list[str], str]:
     task = root / ".team" / "sessions" / work_id / "task.md"
     if not task.is_file():
         return [f"task.md가 없다: {work_id}"], ""
-    section = _plan_section(task.read_text(encoding="utf-8"))
+    body = task.read_text(encoding="utf-8")
+    section = _plan_section(body)
+    outside = _named_section(body, "## 계획 밖")
     errors: list[str] = []
+    allowed: set[str] = set()
     found = 0
     for raw in section.splitlines():
         line = raw.strip()
@@ -264,16 +271,31 @@ def plan_check(root: Path, work_id: str) -> tuple[list[str], str]:
         for field, value in (("단위", name), ("의존", dep), ("파일", files), ("검증", check)):
             if not value:
                 errors.append(f"{label}의 {field}이 없다")
+        for piece in files.replace(",", " ").split():
+            if piece:
+                allowed.add(piece)
     if found == 0:
         errors.append("계획 단위가 없다")
-    notice = ""
+    for raw in outside.splitlines():
+        line = raw.strip()
+        match = _PLAN_ROW.match(line) if line.startswith("-") else None
+        if match is None:
+            continue
+        name = match.group(1).strip() or "(이름 없음)"
+        errors.append(f"계획 밖 단위다: {name}")
+    notices: list[str] = []
     if len(section.splitlines()) > PLAN_SCREEN:
-        notice = "계획이 한 화면을 넘었다. 계획을 줄여라.\n"
+        notices.append("계획이 한 화면을 넘었다. 계획을 줄여라.")
     log_path = root / ".team" / "sessions" / work_id / "log.md"
     log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
     if not _has_go(log_text):
         for path in code_dirty_paths(root):
             errors.append(f"go 전에 코드가 바뀌었다: {path}")
+    elif allowed:
+        for path in code_dirty_paths(root):
+            if path not in allowed and not path.startswith(".team/"):
+                notices.append(f"파일 목록 밖이다: {path}")
+    notice = "".join(item + "\n" for item in notices)
     return errors, notice
 
 
