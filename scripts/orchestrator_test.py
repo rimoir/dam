@@ -582,6 +582,36 @@ class JudgeTest(unittest.TestCase):
         self.assertTrue(record["line"].startswith("PASS"))
         self.assertFalse((self.root / "marker.txt").exists())
 
+    def test_github_token_shapes_leave_every_note(self) -> None:
+        gho = "gho_" + ("B" * 36)
+        ghp = "ghp_" + ("C" * 36)
+        folder = self.root / ".team" / "sessions" / "75"
+        folder.mkdir(parents=True)
+        (folder / "result.md").write_text(
+            f"# 결과\n\n## 결과\n\nPASS {gho}\n\n## 교훈 후보\n\n- EXTRA-BODY {ghp}\n",
+            encoding="utf-8",
+        )
+        (folder / "state.md").write_text(
+            "# 상태\n\n## 다음 할 일\n\n고쳤다\n",
+            encoding="utf-8",
+        )
+        (folder / "log.md").write_text(f"2026-11-26T00:00:00Z Codex 시작 {ghp}\n", encoding="utf-8")
+        done = run_orch(self.root, "collect", "--work", "75")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn(gho, done.stdout)
+        self.assertNotIn(ghp, done.stdout)
+        self.assertTrue(parse_record(done.stdout)["line"].startswith("PASS"))
+        result = (folder / "result.md").read_text(encoding="utf-8")
+        out = (folder / "worker-out.txt").read_text(encoding="utf-8")
+        log = (folder / "log.md").read_text(encoding="utf-8")
+        self.assertNotIn(gho, result)
+        self.assertNotIn(ghp, result)
+        self.assertNotIn(gho, out)
+        self.assertNotIn(ghp, out)
+        self.assertNotIn(ghp, log)
+        self.assertNotIn(gho, log)
+        self.assertIn("EXTRA-BODY", result)
+
     def test_stall_notice_for_a_live_worker(self) -> None:
         module = load_module(SCRIPT, "orchestrator_stall")
         self.assertEqual(module.STALL_LIMIT_SECONDS, 900)
