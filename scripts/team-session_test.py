@@ -1013,5 +1013,77 @@ sys.exit(3)
         self.assertIn("- 99: 상태 시작, 담당 qa, 막힘 없음", text)
 
 
+class WorkerWriteDecisionTest(unittest.TestCase):
+    def test_adr_0007_replaces_conflicting_lines(self) -> None:
+        adr = (ROOT / "docs/adr/0007-worker-github-write-and-merge.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("squash 머지", adr)
+        self.assertIn("처음부터 push, PR, 머지 도구", adr)
+        self.assertIn("헤드 SHA", adr)
+        self.assertIn("확인 방법", adr)
+        self.assertIn("증거", adr)
+        self.assertIn(
+            "https://github.com/rimoir/dam/issues/4#issuecomment-7182074410", adr
+        )
+        self.assertIn(
+            "https://github.com/rimoir/dam/issues/60#issuecomment-7183757371", adr
+        )
+        self.assertIn("같은 GitHub 계정", adr)
+        self.assertIn("샌드박스", adr)
+        self.assertIn("새 토큰은 만들지 않는다", adr)
+        self.assertIn("docs/conventions.md", adr)
+        self.assertIn("제품 워커", adr)
+        self.assertIn("force push", adr)
+        self.assertIn("이슈 라벨", adr)
+        self.assertIn("직접 확인", adr)
+
+        rule = (ROOT / ".rulesync/rules/dam.md").read_text(encoding="utf-8")
+        self.assertNotIn("PR은 자동으로 열지 않는다", rule)
+        self.assertNotIn("사람이 그 동작을 직접 명령했을 때만 그 어댑터를 통한다", rule)
+        self.assertIn("ADR 0007", rule)
+        self.assertIn("새 토큰은 만들지 않는다", rule)
+        self.assertIn("python3 scripts/team-session.py pull", rule)
+
+        adr5 = (ROOT / "docs/adr/0005-adapter-choice.md").read_text(encoding="utf-8")
+        self.assertIn("일부 대체: 0007", adr5)
+        self.assertIn("ADR 0007 조건 안의 워커", adr5)
+        self.assertIn("작업 시작 명령은 그 함수를 부르지 않는다", adr5)
+
+        adr3 = (ROOT / "docs/adr/0003-ci-and-merge.md").read_text(encoding="utf-8")
+        self.assertIn("사람, 또는 ADR 0007 조건을 지킨 워커", adr3)
+        self.assertIn("헤드 SHA", adr3)
+        self.assertIn("확인 방법", adr3)
+        self.assertNotIn("이 비공개 저장소", adr3)
+        self.assertIn("이 저장소는 공개다", adr3)
+
+        spec = (ROOT / "docs/spec.md").read_text(encoding="utf-8")
+        self.assertNotIn("사람이 그 동작을 직접 명령했을 때만 호출한다", spec)
+        self.assertIn("ADR 0007 조건 안의 워커", spec)
+        self.assertIn("작업 시작 명령은 읽기만 한다", spec)
+
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertNotIn("PR은 사람이 명령할 때만 연다", readme)
+        self.assertIn("ADR 0007", readme)
+        self.assertIn("헤드 SHA", readme)
+        self.assertIn("사람이 이미 로그인한", readme)
+
+        conventions = (ROOT / "docs/conventions.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "| Dev bot | how (tech spec, PRs) | code, `docs/`, `.team/`, PRs, sub-issues | merge, deploy, external posts |",
+            conventions,
+        )
+
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            generated = (ROOT / name).read_text(encoding="utf-8")
+            self.assertNotIn("PR은 자동으로 열지 않는다", generated)
+            self.assertIn("ADR 0007", generated)
+
+        gate = (ROOT / "scripts/issue_tracker.py").read_text(encoding="utf-8")
+        self.assertIn(
+            "GitHub 쓰기는 사람이 그 동작을 직접 명령했을 때만 한다", gate
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
