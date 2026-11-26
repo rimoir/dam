@@ -637,5 +637,65 @@ class PlanCheckTest(unittest.TestCase):
         self.assertIn("줄여라", result.stdout)
 
 
+class GoScopeTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        subprocess.run(["git", "init"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=self.root, check=True)
+        (self.root / "a.py").write_text("x = 1\n", encoding="utf-8")
+        (self.root / "b.py").write_text("y = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "a.py", "b.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=self.root, check=True, capture_output=True)
+        folder = self.root / ".team" / "sessions" / "69"
+        folder.mkdir(parents=True)
+        (folder / "log.md").write_text(
+            "2026-11-26T00:00:00Z Codex go 계획 승인\n",
+            encoding="utf-8",
+        )
+        (folder / "task.md").write_text(
+            "# 작업\n\n## 계획\n\n- 읽기 | 없음 | a.py | python3 a_test.py\n\n## 계획 밖\n\n- 새단위 | 없음 | b.py | python3 b_test.py\n",
+            encoding="utf-8",
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _run(self) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        return subprocess.run(
+            ["python3", str(SCRIPT), "plan-check", "69"],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_extra_unit_stops(self) -> None:
+        result = self._run()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("계획 밖 단위다: 새단위", result.stderr)
+
+    def test_file_outside_the_list_is_a_warning(self) -> None:
+        task = self.root / ".team" / "sessions" / "69" / "task.md"
+        task.write_text(
+            "# 작업\n\n## 계획\n\n- 읽기 | 없음 | a.py | python3 a_test.py\n",
+            encoding="utf-8",
+        )
+        (self.root / "b.py").write_text("y = 2\n", encoding="utf-8")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("파일 목록 밖이다: b.py", result.stdout)
+
+    def test_rule_and_adr_name_the_go_scope(self) -> None:
+        rule = (ROOT / ".rulesync/rules/dam.md").read_text(encoding="utf-8")
+        adr = (ROOT / "docs/adr/0002-subagent-driven-development.md").read_text(encoding="utf-8")
+        self.assertIn("go 하나는 그 계획 전체", rule)
+        self.assertIn("## go의 범위", adr)
+        self.assertLessEqual(len(rule.splitlines()), 50)
+
+
 if __name__ == "__main__":
     unittest.main()
