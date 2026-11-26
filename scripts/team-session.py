@@ -24,6 +24,7 @@ from issue_tracker import (  # noqa: E402
     load_tracker,
     redact,
 )
+from session_context import current_branch, render_start_context  # noqa: E402
 
 ISSUE_ID = re.compile(r"^[0-9]+$")
 DATE_ID = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -257,6 +258,15 @@ def main(argv: list[str] | None = None) -> int:
     new.add_argument("--session", default="미정")
     summary = sub.add_parser("summary", help="세션 시작 요약으로 state.md만 출력한다.")
     summary.add_argument("work_id")
+    start = sub.add_parser(
+        "start-context",
+        help="현황판의 열린 줄과 작업 하나의 state.md를 낸다.",
+    )
+    start.add_argument(
+        "--switch",
+        action="store_true",
+        help="도구를 바꿀 때 로그 마지막 5줄을 더한다.",
+    )
     pull = sub.add_parser("pull", help="사람이 명령했을 때만 PR을 연다.")
     pull.add_argument("work_id")
     pull.add_argument("--title", required=True)
@@ -269,6 +279,8 @@ def main(argv: list[str] | None = None) -> int:
             create_session(root, args.work_id, args.session)
         elif args.command == "summary":
             sys.stdout.write(summary_text(root, args.work_id))
+        elif args.command == "start-context":
+            sys.stdout.write(render_start_context(root, current_branch(root), args.switch))
         elif args.command == "pull":
             sys.stdout.write(open_work_pr(root, args.work_id, args.title, args.tool) + "\n")
         elif args.command == "board":
