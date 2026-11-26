@@ -1,0 +1,47 @@
+$ judge PASS
+ok: 예
+handle: 
+state: 성공
+line: PASS 끝
+reason: 
+$ judge ISSUES
+ok: 예
+handle: 
+state: 문제
+line: ISSUES 남음
+reason: 
+$ judge BLOCKED
+ok: 예
+handle: 
+state: 문제
+line: BLOCKED 막힘
+reason: 
+$ judge fail
+ok: 예
+handle: 
+state: 실패
+line: PASS 끝
+reason: 
+$ judge empty
+ok: 예
+handle: 
+state: 미완
+line: 
+reason: 
+$ stall
+ok: 예
+handle: 
+state: 멈춤 의심
+line: 멈춤 의심
+reason: 
+$ collect secret
+ok: 예
+handle: 
+state: 성공
+line: PASS 숨김
+reason: 
+token in stdout above should be absent
+result file has token?
+no
+out-no
+extra-no
