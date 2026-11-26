@@ -30,6 +30,7 @@ from session_context import (  # noqa: E402
     render_start_context,
     rotate_log,
     set_mode,
+    text_line_errors,
 )
 
 ISSUE_ID = re.compile(r"^[0-9]+$")
@@ -303,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(set_mode(root, current_branch(root), args.name))
         elif args.command == "check":
             errors = limit_errors(root, current_branch(root))
+            errors.extend(text_line_errors(root))
             if errors:
                 print("\n".join(errors), file=sys.stderr)
                 return 1
