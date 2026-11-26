@@ -10,6 +10,7 @@ import argparse
 import fcntl
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -163,6 +164,28 @@ def create_session(root: Path, work_id: str, session: str, tracker=None) -> None
         raise
 
 
+def open_work_pr(root: Path, work_id: str, title: str, tool: str, tracker=None) -> str:
+    if tool not in ("Claude Code", "Codex"):
+        raise SystemExit("도구는 Claude Code 또는 Codex다")
+    if not ISSUE_ID.fullmatch(work_id):
+        raise SystemExit("작업ID가 이슈 번호가 아니다")
+    if not title.strip():
+        raise SystemExit("제목이 없다")
+    log_path = root / ".team" / "sessions" / work_id / "log.md"
+    if not log_path.is_file():
+        raise SystemExit(f"log.md가 없다: {work_id}")
+    active = tracker if tracker is not None else load_tracker(root)
+    body = f"{active.issue_link(int(work_id))}\n"
+    url = active.open_pull_request(title.strip(), body, commanded=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    text = log_path.read_text(encoding="utf-8")
+    if text and not text.endswith("\n"):
+        text += "\n"
+    text += f"{stamp} {tool} push {url}\n"
+    log_path.write_text(text, encoding="utf-8")
+    return url
+
+
 LIMIT = 10000
 
 
@@ -186,6 +209,10 @@ def main(argv: list[str] | None = None) -> int:
     new.add_argument("--session", default="미정")
     summary = sub.add_parser("summary", help="세션 시작 요약으로 state.md만 출력한다.")
     summary.add_argument("work_id")
+    pull = sub.add_parser("pull", help="사람이 명령했을 때만 PR을 연다.")
+    pull.add_argument("work_id")
+    pull.add_argument("--title", required=True)
+    pull.add_argument("--tool", required=True)
     args = parser.parse_args(argv)
     root = repo_root()
     try:
@@ -193,6 +220,8 @@ def main(argv: list[str] | None = None) -> int:
             create_session(root, args.work_id, args.session)
         elif args.command == "summary":
             sys.stdout.write(summary_text(root, args.work_id))
+        elif args.command == "pull":
+            sys.stdout.write(open_work_pr(root, args.work_id, args.title, args.tool) + "\n")
     except IssueTrackerError as exc:
         print(redact(str(exc)), file=sys.stderr)
         return 1

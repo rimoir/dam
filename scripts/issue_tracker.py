@@ -44,6 +44,7 @@ _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 _ITEM = re.compile(r"^\s*[-*]\s+(?:\[[ xX]\]\s+)?(.+?)\s*$")
 _COVERS = re.compile(r"^\s*(?:[-*]\s+)?Covers:\s*(.+?)\s*$")
 _ISSUE_URL = re.compile(r"^https://github\.com/[^/\s]+/[^/\s]+/issues/[0-9]+$")
+_PR_URL = re.compile(r"^https://github\.com/[^/\s]+/[^/\s]+/pull/[0-9]+$")
 _SLUGS = (
     re.compile(r"^https://github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?/?$"),
     re.compile(r"^git@github\.com:([^/\s]+)/([^/\s]+?)(?:\.git)?$"),
@@ -223,20 +224,32 @@ class GithubIssueTracker:
             commanded,
         )
 
-    def open_pull_request(self, title: str, body: str, *, commanded: bool) -> None:
-        self._write(
+    def issue_link(self, number: int) -> str:
+        return f"https://github.com/{self.slug}/issues/{number}"
+
+    def open_pull_request(self, title: str, body: str, *, commanded: bool) -> str:
+        result = self._write(
             ["gh", "pr", "create", "--repo", self.slug, "--title", title, "--body-file", "-"],
             commanded,
             stdin=body,
         )
+        found = ""
+        for line in redact(result.stdout).splitlines():
+            candidate = line.strip()
+            if _PR_URL.fullmatch(candidate):
+                found = candidate
+        if not found:
+            raise IssueTrackerError("PR 주소를 읽지 못했다")
+        return found
 
-    def _write(self, args: list[str], commanded: bool, stdin: str | None = None) -> None:
+    def _write(self, args: list[str], commanded: bool, stdin: str | None = None) -> GhResult:
         if not commanded:
             raise IssueTrackerError("GitHub 쓰기는 사람이 그 동작을 직접 명령했을 때만 한다")
         result = self.runner(args, stdin)
         if result.code != 0:
             reason = redact(result.stderr).strip() or "gh가 실패했다"
             raise IssueTrackerError(f"GitHub에 쓰지 못했다: {reason}")
+        return result
 
 
 def lock_tracker(notes_root: Path) -> str:
