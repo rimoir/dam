@@ -179,6 +179,7 @@ def create_session(root: Path, work_id: str, session: str, tracker=None) -> None
 
 
 _BOARD_ISSUE = re.compile(r"^(- [0-9]+: 상태 [^,\n]+, 담당 [^,\n]+, 막힘 [^,\n]+)")
+_LAST_LOG = re.compile(r", 마지막 로그 ([^,\n]+)")
 
 
 def github_clause(view: WorkView) -> str:
@@ -205,7 +206,10 @@ def _refresh_text(original: str, active) -> str:
         number = prefix.split(":", 1)[0][2:]
         view = active.read_status(int(number))
         ending = "\n" if line.endswith("\n") else ""
-        pieces.append(f"{prefix}, {github_clause(view)}{ending}")
+        rest = line.rstrip("\n")[match.end() :]
+        last = _LAST_LOG.search(rest)
+        last_clause = f", 마지막 로그 {last.group(1).strip()}" if last else ""
+        pieces.append(f"{prefix}{last_clause}, {github_clause(view)}{ending}")
     return "".join(pieces)
 
 

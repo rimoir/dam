@@ -20,7 +20,13 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from session_context import _named_section, _plan_path, log_has_go, read_plan_units  # noqa: E402
+from session_context import (  # noqa: E402
+    _named_section,
+    _plan_path,
+    log_has_go,
+    open_board_lines,
+    read_plan_units,
+)
 
 FIELDS = ("ok", "handle", "state", "line", "reason")
 KNOWN = frozenset({"native", "fake"})
@@ -303,6 +309,70 @@ def worker_brief(repo: Path, work_id: str) -> str:
     return "\n".join(chunks)
 
 
+_STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\b")
+_BOARD_PREFIX = re.compile(r"^(- \S+: 상태 [^,]+, 담당 [^,]+, 막힘 [^,]+)")
+
+
+def last_log_stamp(text: str) -> str:
+    found = ""
+    for raw in text.splitlines():
+        match = _STAMP.match(raw.strip())
+        if match:
+            found = match.group(1)
+    return found
+
+
+def record_parallel(root: Path, work_id: str) -> dict[str, str]:
+    folder = root / ".team" / "sessions" / work_id
+    log_path = folder / "log.md"
+    log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
+    stamp = last_log_stamp(log_text)
+    if not stamp:
+        return blank(ok="아니오", state="거부", reason="로그 시각이 없다")
+    state_path = folder / "state.md"
+    state = state_path.read_text(encoding="utf-8") if state_path.is_file() else ""
+    marker = f"마지막 로그: {stamp}"
+    if marker not in state:
+        if state and not state.endswith("\n"):
+            state += "\n"
+        state_path.write_text(state + marker + "\n", encoding="utf-8")
+    board_path = root / ".team" / "board.md"
+    text = board_path.read_text(encoding="utf-8") if board_path.is_file() else ""
+    prefix = f"- {work_id}:"
+    found = False
+    lines: list[str] = []
+    for raw in text.splitlines():
+        if raw.startswith(prefix):
+            found = True
+            match = _BOARD_PREFIX.match(raw)
+            base = match.group(1) if match else raw.split(", 마지막 로그", 1)[0].split(", GitHub", 1)[0]
+            lines.append(f"{base}, 마지막 로그 {stamp}")
+        else:
+            lines.append(raw)
+    if not found:
+        lines.append(f"- {work_id}: 상태 시작, 담당 cursor, 막힘 없음, 마지막 로그 {stamp}")
+    board_path.parent.mkdir(parents=True, exist_ok=True)
+    board_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return blank(ok="예", state="적음", line=stamp)
+
+
+def resume_parallel(root: Path) -> str:
+    kept: list[str] = []
+    for work_id, raw in open_board_lines(root):
+        if "마지막 로그" not in raw:
+            continue
+        state_path = root / ".team" / "sessions" / work_id / "state.md"
+        if not state_path.is_file():
+            continue
+        state = state_path.read_text(encoding="utf-8")
+        match = re.search(r"마지막 로그 ([^,]+)", raw)
+        if match and match.group(1).strip() in state:
+            kept.append(raw)
+    if not kept:
+        return ""
+    return "\n".join(kept) + "\n"
+
+
 def redact_secret(text: str) -> str:
     return _SECRET.sub("숨김", text)
 
@@ -405,6 +475,9 @@ def main(argv: list[str] | None = None) -> int:
     stall_cmd.add_argument("--last", required=True)
     stall_cmd.add_argument("--now", required=True)
     stall_cmd.add_argument("--alive", action="store_true")
+    parallel_cmd = sub.add_parser("parallel", help="현황판에 마지막 로그 시각을 적는다.")
+    parallel_cmd.add_argument("--work", required=True)
+    resume_cmd = sub.add_parser("resume-parallel", help="현황판과 상태 파일만으로 줄을 다시 읽는다.")
     poll_cmd = sub.add_parser("poll", help="핸들의 상태를 읽는다.")
     poll_cmd.add_argument("--handle", required=True)
     collect_cmd = sub.add_parser("collect", help="결과 한 줄을 읽는다.")
@@ -430,6 +503,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "brief":
             text = worker_brief(root, args.work)
             sys.stdout.write(text if text.endswith("\n") else text + "\n")
+            return 0
+        elif args.command == "parallel":
+            record = record_parallel(root, args.work)
+        elif args.command == "resume-parallel":
+            sys.stdout.write(resume_parallel(root))
             return 0
         elif args.command == "judge":
             kind = judge(args.exit, args.line, args.next_updated, args.turn_failed)
