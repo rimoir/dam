@@ -15,3 +15,8 @@ gitleaks version
 gitleaks detect --source . --no-git -v
 no leaks found
 gitleaks_tree_exit: 0
+
+gitleaks detect --source . --log-opts="origin/main..HEAD" -v
+1 commits scanned
+no leaks found
+range_exit: 0
