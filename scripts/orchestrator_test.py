@@ -425,8 +425,11 @@ class PrepareTest(unittest.TestCase):
         self.repo = self.box / "dam"
         init_repo(self.repo)
         install_fake_gh(self.repo)
+        self._old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(self.repo / "bin") + os.pathsep + self._old_path
 
     def tearDown(self) -> None:
+        os.environ["PATH"] = self._old_path
         subprocess.run(
             ["git", "-C", str(self.repo), "worktree", "list", "--porcelain"],
             check=False,
