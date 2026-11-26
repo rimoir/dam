@@ -558,6 +558,29 @@ class CodeCleanTest(unittest.TestCase):
         self.assertEqual(dirty.returncode, 1, dirty.stdout)
         self.assertIn("scripts/ok.py", dirty.stderr)
 
+    def test_rename_into_team_keeps_the_outside_path(self) -> None:
+        (self.root / ".team").mkdir()
+        subprocess.run(
+            ["git", "mv", "scripts/ok.py", ".team/ok.py"],
+            cwd=self.root,
+            check=True,
+        )
+        result = self._run("code-clean")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("scripts/ok.py", result.stderr)
+
+    def test_arrow_inside_a_team_name_stays_clean(self) -> None:
+        team = self.root / ".team"
+        team.mkdir()
+        (team / "keep.md").write_text("노트\n", encoding="utf-8")
+        subprocess.run(["git", "add", ".team/keep.md"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "note"], cwd=self.root, check=True, capture_output=True)
+        (team / "a -> b.md").write_text("x\n", encoding="utf-8")
+        result = self._run("code-clean")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
     def test_result_is_written_only_for_an_open_task(self) -> None:
         from session_context import append_result
 
@@ -636,6 +659,62 @@ class PlanCheckTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("줄여라", result.stdout)
 
+    def test_claude_code_go_allows_a_planned_edit(self) -> None:
+        log = self.root / ".team" / "sessions" / "68" / "log.md"
+        log.write_text("2026-11-26T00:00:00Z Claude Code go 계획 승인\n", encoding="utf-8")
+        (self.root / "scripts" / "ok.py").write_text("x = 2\n", encoding="utf-8")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_missing_last_pipe_names_the_blank_field(self) -> None:
+        task = self.root / ".team" / "sessions" / "68" / "task.md"
+        task.write_text("# 작업\n\n## 계획\n\n- 읽기 | 없음 | scripts/ok.py\n", encoding="utf-8")
+        result = self._run()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("읽기의 검증이 없다", result.stderr)
+        self.assertNotIn("계획 단위가 없다", result.stderr)
+
+    def test_forty_unit_rows_stay_on_one_screen(self) -> None:
+        rows = "\n".join(
+            f"- 단위{i} | 없음 | scripts/ok.py | python3 scripts/ok_test.py" for i in range(40)
+        )
+        task = self.root / ".team" / "sessions" / "68" / "task.md"
+        task.write_text(f"# 작업\n\n## 계획\n\n{rows}\n", encoding="utf-8")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_date_work_id_reads_four_columns(self) -> None:
+        folder = self.root / ".team" / "sessions" / "2026-11-26-feat"
+        folder.mkdir(parents=True)
+        (folder / "log.md").write_text("# 로그\n", encoding="utf-8")
+        (folder / "task.md").write_text(
+            "# 작업\n\n## 계획\n\n- 읽기 | 없음 | scripts/ok.py | python3 scripts/ok_test.py\n",
+            encoding="utf-8",
+        )
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        result = subprocess.run(
+            ["python3", str(SCRIPT), "plan-check", "2026-11-26-feat"],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_four_columns_without_a_dash_are_a_unit(self) -> None:
+        task = self.root / ".team" / "sessions" / "68" / "task.md"
+        task.write_text(
+            "# 작업\n\n## 계획\n\n읽기 | 없음 | scripts/ok.py | python3 scripts/ok_test.py\n",
+            encoding="utf-8",
+        )
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
 
 class GoScopeTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -696,6 +775,46 @@ class GoScopeTest(unittest.TestCase):
         self.assertIn("## go의 범위", adr)
         self.assertLessEqual(len(rule.splitlines()), 50)
 
+    def test_claude_code_go_warns_for_a_file_outside_the_list(self) -> None:
+        log = self.root / ".team" / "sessions" / "69" / "log.md"
+        log.write_text("2026-11-26T00:00:00Z Claude Code go 계획 승인\n", encoding="utf-8")
+        task = self.root / ".team" / "sessions" / "69" / "task.md"
+        task.write_text(
+            "# 작업\n\n## 계획\n\n- 읽기 | 없음 | a.py | python3 a_test.py\n",
+            encoding="utf-8",
+        )
+        (self.root / "b.py").write_text("y = 2\n", encoding="utf-8")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("파일 목록 밖이다: b.py", result.stdout)
+
+    def test_outside_heading_stops_on_every_nonempty_line(self) -> None:
+        task = self.root / ".team" / "sessions" / "69" / "task.md"
+        for extra, name in (
+            ("* 새단위 | 없음 | b.py | python3 b_test.py", "새단위"),
+            ("- 새단위 | 없음 | b.py", "새단위"),
+            ("- 범위 변경", "범위 변경"),
+        ):
+            task.write_text(
+                "# 작업\n\n## 계획\n\n- 읽기 | 없음 | a.py | python3 a_test.py\n\n"
+                f"## 계획 밖\n\n{extra}\n",
+                encoding="utf-8",
+            )
+            result = self._run()
+            self.assertEqual(result.returncode, 1, extra)
+            self.assertIn(f"계획 밖 단위다: {name}", result.stderr)
+
+    def test_dot_slash_in_the_plan_matches_the_work_tree(self) -> None:
+        task = self.root / ".team" / "sessions" / "69" / "task.md"
+        task.write_text(
+            "# 작업\n\n## 계획\n\n- 읽기 | 없음 | ./a.py | python3 a_test.py\n",
+            encoding="utf-8",
+        )
+        (self.root / "a.py").write_text("x = 2\n", encoding="utf-8")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("파일 목록 밖이다", result.stdout)
+
 
 class ResumeModeTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -747,6 +866,58 @@ class ResumeModeTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("상태 파일이 없다", result.stderr)
         self.assertFalse((bare / ".team" / "sessions" / "70").exists())
+
+    def test_blank_mode_round_trip(self) -> None:
+        path = self.root / ".team" / "sessions" / "70" / "state.md"
+        path.write_text("모드:\n# 상태 70\n다음 할 일\n", encoding="utf-8")
+        begin = self._run("begin")
+        self.assertEqual(begin.returncode, 0, begin.stderr)
+        end = self._run("end")
+        self.assertEqual(end.returncode, 0, end.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertTrue(after.startswith("모드:\n"))
+        self.assertNotIn("이전 모드:", after)
+        self.assertIn("다음 할 일\n", after)
+
+    def test_mode_resume_then_begin_records_the_marker(self) -> None:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["GITHUB_HEAD_REF"] = "work-70"
+        changed = subprocess.run(
+            ["python3", str(SCRIPT), "mode", "이어받기"],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(changed.returncode, 0, changed.stderr)
+        begin = self._run("begin")
+        self.assertEqual(begin.returncode, 0, begin.stderr)
+        text = (self.root / ".team" / "sessions" / "70" / "state.md").read_text(encoding="utf-8")
+        self.assertIn("이전 모드: 이어받기\n", text)
+        end = self._run("end")
+        self.assertEqual(end.returncode, 0, end.stderr)
+        after = (self.root / ".team" / "sessions" / "70" / "state.md").read_text(encoding="utf-8")
+        self.assertTrue(after.startswith("모드: 이어받기\n"))
+        self.assertNotIn("이전 모드:", after)
+
+    def test_reason_suffix_is_restored_and_a_bad_name_is_unchanged(self) -> None:
+        path = self.root / ".team" / "sessions" / "70" / "state.md"
+        path.write_text("모드: 작은 수정 (이유: 파일 1곳)\n# 상태 70\nKEEP\n", encoding="utf-8")
+        begin = self._run("begin")
+        self.assertEqual(begin.returncode, 0, begin.stderr)
+        end = self._run("end")
+        self.assertEqual(end.returncode, 0, end.stderr)
+        after = path.read_text(encoding="utf-8")
+        self.assertTrue(after.startswith("모드: 작은 수정 (이유: 파일 1곳)\n"))
+        self.assertNotIn("이전 모드:", after)
+        self.assertIn("KEEP\n", after)
+        path.write_text("모드: 이어받기\n이전 모드: 없는모드\nKEEP\n", encoding="utf-8")
+        before = path.read_text(encoding="utf-8")
+        failed = self._run("end")
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("모드 이름이 아니다", failed.stderr)
+        self.assertEqual(path.read_text(encoding="utf-8"), before)
 
 
 if __name__ == "__main__":
