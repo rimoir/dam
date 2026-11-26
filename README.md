@@ -62,11 +62,14 @@ codex plugin list --json
 
 세션 시작은 저장소 안의 SessionStart 훅이 `python3 scripts/team-session.py start-context`를 실행한다. Claude Code는 `.claude/settings.json`, Codex는 `.codex/hooks.json`이다. matcher는 `startup|resume|clear|compact`이고 타임아웃은 임시 10초다. 명령이 실패해도 `|| true` 때문에 셸은 종료 0이고 세션 시작은 막히지 않는다. 사용자 홈과 전역 설정은 바꾸지 않는다. 결정은 `docs/adr/0006-session-start-hooks.md`다. 이 결정은 #3의 '훅 파일을 추가하지 않는다'를 뒤집는다.
 
-Codex는 `.codex/hooks.json`이 바뀔 때마다 신뢰 검토가 필요하다. 절차는 이렇다.
+Codex가 `.codex/hooks.json`의 훅을 실행하려면 사람이 그 정의를 검토하고 신뢰해야 한다. 출처는 https://developers.openai.com/codex/hooks 다.
 
-1. `git diff`로 `.codex/hooks.json`만 본다.
-2. 명령이 이 저장소의 `scripts/team-session.py start-context`인지, 홈 경로나 다른 네트워크 명령이 없는지 확인한다.
-3. 그 다음에 Codex의 프로젝트 신뢰 질문에 동의한다. 동의하기 전에는 바뀐 훅을 실행하지 않는다.
+1. 관리되지 않는 훅은 실행 전에 검토와 신뢰가 필요하다.
+2. Codex는 신뢰를 훅 정의의 현재 해시에 기록한다. 새 훅이나 바뀐 훅은 검토 대상으로 표시되고, 신뢰하기 전에는 건너뛴다.
+3. CLI에서 `/hooks`를 연다. 거기서 훅 출처를 보고, 새 훅이나 바뀐 훅을 검토하고, 신뢰하거나, 비관리 훅을 하나씩 끈다.
+4. 시작 때 검토가 필요하면 Codex는 `/hooks`를 열라는 경고를 낸다. 저장소 훅은 신뢰된 프로젝트 층의 `.codex/hooks.json`에서 읽힌다.
+
+위 문서에 없는 시작 질문이나 diff 순서는 적지 않는다.
 
 ```bash
 codex
