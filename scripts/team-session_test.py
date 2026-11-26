@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """team-session 생성기의 실패 우선 검사."""
 
+import importlib.util
+import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -9,11 +12,89 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "team-session.py"
+TRACKER = ROOT / "scripts" / "issue_tracker.py"
 
 
-def run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def install_fake_gh(root: Path) -> Path:
+    bindir = root / "bin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    script = bindir / "gh"
+    script.write_text(
+        """#!/usr/bin/env python3
+import json
+import os
+import sys
+
+log_path = os.environ.get("GH_LOG")
+if log_path:
+    with open(log_path, "a", encoding="utf-8") as handle:
+        handle.write(" ".join(sys.argv[1:]) + "\\n")
+failed = os.environ.get("GH_FAIL")
+if failed:
+    sys.stderr.write(failed)
+    if not failed.endswith("\\n"):
+        sys.stderr.write("\\n")
+    sys.exit(1)
+raw = os.environ.get("GH_RAW")
+if raw is not None:
+    sys.stdout.write(raw)
+    sys.exit(0)
+args = sys.argv[1:]
+if len(args) >= 3 and args[0] == "issue" and args[1] == "view":
+    number = args[2]
+    custom = os.environ.get("GH_JSON_FILE")
+    if custom:
+        sys.stdout.write(open(custom, encoding="utf-8").read())
+        sys.exit(0)
+    body = "### Acceptance Criteria\\n\\n- [ ] 조건 %s\\n" % number
+    json.dump(
+        {
+            "title": "이슈 %s" % number,
+            "url": "https://github.com/rimoir/dam/issues/%s" % number,
+            "body": body,
+        },
+        sys.stdout,
+    )
+    sys.exit(0)
+sys.stderr.write("거절된 gh 호출\\n")
+sys.exit(3)
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return bindir
+
+
+def run(
+    root: Path,
+    *args: str,
+    gh_fail: str | None = None,
+    gh_json: dict | None = None,
+    gh_raw: str | None = None,
+    path_mode: str = "fake",
+) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["TEAM_ROOT"] = str(root)
+    env.pop("GH_FAIL", None)
+    env.pop("GH_JSON_FILE", None)
+    env.pop("GH_RAW", None)
+    if path_mode == "fake":
+        bindir = install_fake_gh(root)
+        env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+        env["GH_LOG"] = str(root / "gh.log")
+        if gh_fail is not None:
+            env["GH_FAIL"] = gh_fail
+        if gh_json is not None:
+            payload = root / "issue.json"
+            payload.write_text(json.dumps(gh_json), encoding="utf-8")
+            env["GH_JSON_FILE"] = str(payload)
+        if gh_raw is not None:
+            env["GH_RAW"] = gh_raw
+    elif path_mode == "bare":
+        python_bin = shutil.which("python3")
+        if not python_bin:
+            raise RuntimeError("python3가 없다")
+        env["PATH"] = str(Path(python_bin).parent)
     return subprocess.run(
         ["python3", str(SCRIPT), *args],
         cwd=root,
@@ -21,6 +102,24 @@ def run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         text=True,
         capture_output=True,
     )
+
+
+def load_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"모듈을 열지 못했다: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def section_map(text: str) -> dict[str, str]:
+    parts = text.split("\n## ")
+    found: dict[str, str] = {}
+    for part in parts[1:]:
+        name, _, body = part.partition("\n")
+        found[name.strip()] = body
+    return found
 
 
 class NewSessionTest(unittest.TestCase):
@@ -117,7 +216,13 @@ class NewSessionTest(unittest.TestCase):
         for i in range(25):
             root = self.root / f"try{i}"
             root.mkdir()
+            bindir = install_fake_gh(root)
             env["TEAM_ROOT"] = str(root)
+            env["PATH"] = str(bindir) + os.pathsep + os.environ.get("PATH", "")
+            env["GH_LOG"] = str(root / "gh.log")
+            env.pop("GH_FAIL", None)
+            env.pop("GH_JSON_FILE", None)
+            env.pop("GH_RAW", None)
             first = subprocess.Popen(
                 ["python3", str(SCRIPT), "new", "12", "--session", "s12"],
                 env=env,
@@ -139,6 +244,237 @@ class NewSessionTest(unittest.TestCase):
             board = (root / ".team" / "board.md").read_text(encoding="utf-8")
             self.assertEqual(board.count("\n- 12:"), 1, board)
             self.assertEqual(board.count("\n- 13:"), 1, board)
+
+
+class IssueStartTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_issue_fields_land_in_the_existing_sections(self) -> None:
+        payload = {
+            "title": "[M3b] 제목",
+            "url": "https://github.com/rimoir/dam/issues/30",
+            "body": (
+                "### Objective\n본문\n\n"
+                "### Covers\n"
+                "Covers: 첫째 조건\n"
+                "Covers: 둘째 조건\n"
+            ),
+        }
+        result = run(self.root, "new", "30", gh_json=payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = (self.root / ".team" / "sessions" / "30" / "task.md").read_text(encoding="utf-8")
+        parts = section_map(task)
+        self.assertIn("[M3b] 제목", parts["목표"])
+        self.assertIn("https://github.com/rimoir/dam/issues/30", parts["목표"])
+        self.assertNotIn("첫째 조건", parts["목표"])
+        self.assertIn("첫째 조건", parts["완료 기준"])
+        self.assertIn("둘째 조건", parts["완료 기준"])
+        self.assertNotIn("[M3b] 제목", parts["완료 기준"])
+        self.assertIn("(단계)", parts["계획"])
+        for name in ("state.md", "log.md", "result.md"):
+            self.assertTrue((self.root / ".team" / "sessions" / "30" / name).is_file())
+        board = (self.root / ".team" / "board.md").read_text(encoding="utf-8")
+        self.assertEqual(board.count("\n- 30:"), 1)
+        self.assertIn("상태 시작", board)
+
+    def test_acceptance_checkboxes_become_the_criteria_list(self) -> None:
+        payload = {
+            "title": "체크 제목",
+            "url": "https://github.com/rimoir/dam/issues/4",
+            "body": (
+                "### Acceptance Criteria\n\n"
+                "- [ ] 열린 조건\n"
+                "- [x] 끝난 조건\n\n"
+                "### Covers\n"
+                "Covers: 이쪽은 목록에 넣지 않는다\n"
+            ),
+        }
+        result = run(self.root, "new", "4", gh_json=payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = (self.root / ".team" / "sessions" / "4" / "task.md").read_text(encoding="utf-8")
+        parts = section_map(task)
+        self.assertIn("- 열린 조건", parts["완료 기준"])
+        self.assertIn("- 끝난 조건", parts["완료 기준"])
+        self.assertNotIn("이쪽은 목록에 넣지 않는다", parts["완료 기준"])
+
+    def test_missing_criteria_leave_an_empty_marker(self) -> None:
+        payload = {
+            "title": "기준 없는 이슈",
+            "url": "https://github.com/rimoir/dam/issues/8",
+            "body": "설명만 있다",
+        }
+        result = run(self.root, "new", "8", gh_json=payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = (self.root / ".team" / "sessions" / "8" / "task.md").read_text(encoding="utf-8")
+        self.assertIn("- (없음)", section_map(task)["완료 기준"])
+
+    def test_fake_tracker_matches_cli_task(self) -> None:
+        session = load_module(SCRIPT, "team_session_under_test")
+        record = session.IssueRecord(
+            number=30,
+            title="같은제목",
+            url="https://github.com/rimoir/dam/issues/30",
+            acceptance=("기준 하나", "기준 둘"),
+        )
+
+        class Fake:
+            def read_issue(self, number: int):
+                self.number = number
+                return record
+
+        fake = Fake()
+        session.create_session(self.root, "30", "dev", fake)
+        via_fake = (self.root / ".team" / "sessions" / "30" / "task.md").read_text(encoding="utf-8")
+        self.assertEqual(fake.number, 30)
+        other = self.root / "cli"
+        other.mkdir()
+        payload = {
+            "title": "같은제목",
+            "url": "https://github.com/rimoir/dam/issues/30",
+            "body": "### Acceptance Criteria\n\n- [ ] 기준 하나\n- [ ] 기준 둘\n",
+        }
+        result = run(other, "new", "30", gh_json=payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        via_cli = (other / ".team" / "sessions" / "30" / "task.md").read_text(encoding="utf-8")
+        self.assertEqual(via_fake, via_cli)
+        self.assertIn("같은제목", section_map(via_cli)["목표"])
+        self.assertIn("https://github.com/rimoir/dam/issues/30", section_map(via_cli)["목표"])
+        self.assertIn("- 기준 하나", section_map(via_cli)["완료 기준"])
+        self.assertIn("- 기준 둘", section_map(via_cli)["완료 기준"])
+
+    def test_new_only_views_the_issue(self) -> None:
+        result = run(self.root, "new", "30")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        log = (self.root / "gh.log").read_text(encoding="utf-8").strip()
+        self.assertEqual(log.count("\n") + 1, 1)
+        self.assertIn("issue view 30", log)
+        self.assertIn("--json title,url,body", log)
+        for banned in ("comment", "close", "edit", " pr ", "label", "api"):
+            self.assertNotIn(banned, log)
+
+    def test_rerun_keeps_handwritten_task_and_skips_read(self) -> None:
+        first = run(self.root, "new", "30")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        task = self.root / ".team" / "sessions" / "30" / "task.md"
+        task.write_text(task.read_text(encoding="utf-8") + "\n손글씨\n", encoding="utf-8")
+        before = task.read_bytes()
+        log = self.root / "gh.log"
+        log.unlink()
+        second = run(self.root, "new", "30", gh_fail="should not run")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(task.read_bytes(), before)
+        self.assertFalse(log.exists())
+
+    def test_read_failure_leaves_no_session(self) -> None:
+        result = run(self.root, "new", "30", gh_fail="gh auth login")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("이슈를 읽지 못했다", result.stderr)
+        self.assertIn("gh auth login", result.stderr)
+        self.assertFalse((self.root / ".team" / "sessions" / "30").exists())
+        self.assertFalse((self.root / ".team" / "board.md").exists())
+
+    def test_read_failure_keeps_existing_files(self) -> None:
+        folder = self.root / ".team" / "sessions" / "12"
+        folder.mkdir(parents=True)
+        keep = folder / "notes.md"
+        keep.write_text("증거\n", encoding="utf-8")
+        result = run(self.root, "new", "12", gh_fail="network down")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(keep.read_text(encoding="utf-8"), "증거\n")
+        self.assertFalse((folder / "task.md").exists())
+        self.assertFalse((self.root / ".team" / "board.md").exists())
+
+    def test_bad_json_leaves_no_session(self) -> None:
+        result = run(self.root, "new", "30", gh_raw="not-json")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("이슈를 읽지 못했다", result.stderr)
+        self.assertFalse((self.root / ".team" / "sessions" / "30").exists())
+
+    def test_missing_gh_leaves_no_notes(self) -> None:
+        result = run(self.root, "new", "41", path_mode="bare")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("gh", result.stderr)
+        self.assertFalse((self.root / ".team" / "sessions" / "41").exists())
+
+    def test_secret_in_gh_error_is_not_echoed(self) -> None:
+        secret = "ghp_" + ("A" * 36)
+        result = run(self.root, "new", "30", gh_fail="login failed " + secret)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn(secret, result.stderr)
+        self.assertNotIn(secret, result.stdout)
+        self.assertFalse((self.root / ".team" / "sessions" / "30").exists())
+
+    def test_date_id_does_not_call_gh(self) -> None:
+        session = load_module(SCRIPT, "team_session_date")
+
+        class Boom:
+            def read_issue(self, number: int):
+                raise AssertionError("date id must not read")
+
+        session.create_session(self.root, "2026-11-26-memo", "dev", Boom())
+        task = (self.root / ".team" / "sessions" / "2026-11-26-memo" / "task.md").read_text(encoding="utf-8")
+        self.assertIn("(한 줄)", section_map(task)["목표"])
+        self.assertNotIn("github.com", task)
+        result = run(self.root, "new", "2026-11-26-other")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        log = self.root / "gh.log"
+        self.assertFalse(log.exists())
+
+    def test_unknown_tracker_leaves_no_notes(self) -> None:
+        team = self.root / ".team"
+        team.mkdir(parents=True)
+        (team / "adapters.lock").write_text("issue-tracker: linear\n", encoding="utf-8")
+        result = run(self.root, "new", "30")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("linear", result.stderr)
+        self.assertFalse((team / "sessions").exists())
+        self.assertFalse((self.root / "gh.log").exists())
+
+    def test_github_lock_still_reads(self) -> None:
+        team = self.root / ".team"
+        team.mkdir(parents=True)
+        (team / "adapters.lock").write_text(
+            "# 선택 결과\nissue-tracker: github\nreport: dooray\n",
+            encoding="utf-8",
+        )
+        result = run(self.root, "new", "30")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = (team / "sessions" / "30" / "task.md").read_text(encoding="utf-8")
+        self.assertIn("이슈 30", section_map(task)["목표"])
+
+    def test_write_without_command_does_not_call_runner(self) -> None:
+        tracker_mod = load_module(TRACKER, "issue_tracker_under_test")
+        called: list[list[str]] = []
+
+        def runner(args: list[str], stdin: str | None = None):
+            called.append(args)
+            return tracker_mod.GhResult(0, "", "")
+
+        tracker = tracker_mod.GithubIssueTracker("rimoir/dam", runner)
+        for call in (
+            lambda: tracker.comment(30, "본문", commanded=False),
+            lambda: tracker.add_label(30, "bug", commanded=False),
+            lambda: tracker.close_issue(30, commanded=False),
+            lambda: tracker.open_pull_request("제목", "본문", commanded=False),
+        ):
+            with self.assertRaises(tracker_mod.IssueTrackerError):
+                call()
+        self.assertEqual(called, [])
+
+    def test_slug_drops_credentials(self) -> None:
+        tracker_mod = load_module(TRACKER, "issue_tracker_slug")
+        secret = "ghs_" + ("b" * 36)
+        url = f"https://x-access-token:{secret}@github.com/rimoir/dam.git"
+        slug = tracker_mod.github_slug(url)
+        self.assertEqual(slug, "rimoir/dam")
+        self.assertNotIn(secret, slug or "")
+        self.assertEqual(tracker_mod.github_slug("git@github.com:rimoir/dam.git"), "rimoir/dam")
+        self.assertIsNone(tracker_mod.github_slug("https://gitlab.com/rimoir/dam.git"))
 
 
 if __name__ == "__main__":
