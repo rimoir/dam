@@ -8,7 +8,7 @@ ci.yml에 `workflow_dispatch`를 더했다. README 검사 절에 `gh workflow ru
 
 `gh workflow run`은 HTTP 403이다. 응답은 `Resource not accessible by integration`이고, 서버가 요구한 권한은 `actions=write`다. 세 job의 workflow_dispatch 실행은 없다.
 
-로그 도구 칸은 세션 72부터 76까지와 같이 `Codex`다.
+로그 도구 칸은 Cursor다. 규칙과 log.md 머리글은 도구를 Claude Code 또는 Codex로만 적는다. 규칙 변경은 별도다.
 
 ## 교훈 후보
 

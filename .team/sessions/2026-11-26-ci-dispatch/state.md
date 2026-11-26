@@ -4,12 +4,12 @@
 
 ## 지금 상태
 
-수동 실행의 gitleaks 추가 커밋 범위는 HEAD가 origin/main과 같으면 HEAD, 아니면 origin/main..HEAD다. pull_request와 push 분기는 그대로다. 로그 도구 칸은 Codex다.
+수동 실행의 gitleaks 추가 커밋 범위는 HEAD가 origin/main과 같으면 HEAD, 아니면 origin/main..HEAD다. pull_request와 push 분기는 그대로다. 로그 도구 칸은 Cursor다.
 
 ## 결정
 
 - workflow_dispatch만 범위를 바꾼다. checkout fetch-depth 0이 origin/main을 가져온다.
-- 로그 도구는 세션 72부터 76까지가 쓴 Codex를 따른다. 세션 30부터 70은 Cursor다.
+- 이 세션의 로그 도구는 Cursor다. 규칙과 log.md 머리글은 Claude Code 또는 Codex만 적는다. 규칙 변경은 별도다.
 
 ## 다음 할 일
 
