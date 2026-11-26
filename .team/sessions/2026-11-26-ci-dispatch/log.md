@@ -9,3 +9,4 @@
 
 2026-11-26T10:36:26Z Cursor 시작 CI를 손으로 다시 돌리게 한다
 2026-11-26T10:36:26Z Cursor go workflow_dispatch와 README 한 줄
+2026-11-26T10:38:12Z Cursor push https://github.com/rimoir/dam/pull/112

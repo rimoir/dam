@@ -4,7 +4,7 @@
 
 ## 지금 상태
 
-ci.yml에 workflow_dispatch만 더했다. pull_request, push, job 본문은 그대로다. README 검사 절에 재실행 명령을 적었다. 로컬 테스트 4개 파일과 gitleaks 작업 트리 검사는 통과했다.
+ci.yml에 workflow_dispatch만 더했다. pull_request, push, job 본문은 그대로다. PR https://github.com/rimoir/dam/pull/112 head `69bc47a`에서 python test, rulesync regen, gitleaks가 통과했다. workflow_dispatch API는 403이다.
 
 ## 결정
 
@@ -13,4 +13,4 @@ ci.yml에 workflow_dispatch만 더했다. pull_request, push, job 본문은 그�
 
 ## 다음 할 일
 
-PR을 열고 검사 세 개와 workflow_dispatch 접수를 확인한다.
+열린 PR에서 멈춘다. 머지하지 않는다.
