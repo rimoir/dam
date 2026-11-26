@@ -1048,18 +1048,23 @@ class WorkerWriteDecisionTest(unittest.TestCase):
         adr5 = (ROOT / "docs/adr/0005-adapter-choice.md").read_text(encoding="utf-8")
         self.assertIn("일부 대체: 0007", adr5)
         self.assertIn("ADR 0007 조건 안의 워커", adr5)
+        self.assertIn("그 결정이 허용한 코멘트와 PR 열기", adr5)
+        self.assertIn("라벨 변경과 이슈 닫기는 사람이 직접 명령했을 때만", adr5)
         self.assertIn("작업 시작 명령은 그 함수를 부르지 않는다", adr5)
 
         adr3 = (ROOT / "docs/adr/0003-ci-and-merge.md").read_text(encoding="utf-8")
         self.assertIn("사람, 또는 ADR 0007 조건을 지킨 워커", adr3)
-        self.assertIn("헤드 SHA", adr3)
-        self.assertIn("확인 방법", adr3)
+        self.assertIn("검토 기록은 승인, 또는", adr3)
+        self.assertIn(
+            "검증 코멘트는 헤드 SHA, 확인 방법, 증거가 있으면 검토 기록이다", adr3
+        )
         self.assertNotIn("이 비공개 저장소", adr3)
         self.assertIn("이 저장소는 공개다", adr3)
 
         spec = (ROOT / "docs/spec.md").read_text(encoding="utf-8")
         self.assertNotIn("사람이 그 동작을 직접 명령했을 때만 호출한다", spec)
         self.assertIn("ADR 0007 조건 안의 워커", spec)
+        self.assertIn("그 결정이 허용한 동작뿐", spec)
         self.assertIn("작업 시작 명령은 읽기만 한다", spec)
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
