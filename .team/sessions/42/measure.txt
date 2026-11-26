@@ -1,0 +1,79 @@
+# 시작 출력 측정
+
+시각: 2026-11-26T02:37:00Z
+명령: python3 scripts/team-session.py start-context
+횟수: 11. 중간값은 정렬 뒤 6번째다.
+이 브랜치 이름은 숫자로 끝나지 않아 열린 줄만 나온다. work-46은 그 작업의 state.md를 포함한다.
+임시 상한 4,000자, 1초 목표보다 작아서 상한은 바꾸지 않는다.
+이 환경에 codex 명령이 없어 사용자 PC의 0.172.0 여부는 확인하지 못했다.
+
+args [] env {}
+exit_ok True
+chars 60 stable True
+median_s 0.042382
+min_s 0.041519 max_s 0.048247
+runs 0.048247 0.044046 0.042488 0.044264 0.042177 0.042382 0.042295 0.042293 0.041519 0.042566 0.042004
+stdout_begin
+- 42: 상태 진행, 담당 cursor, 막힘 없음
+- 46: 상태 진행, 담당 cursor, 막힘 없음
+stdout_end
+---
+args [] env {'GITHUB_HEAD_REF': 'work-46'}
+exit_ok True
+chars 510 stable True
+median_s 0.040782
+min_s 0.040632 max_s 0.040977
+runs 0.040684 0.040685 0.040957 0.040977 0.040800 0.040804 0.040947 0.040782 0.040732 0.040748 0.040632
+stdout_begin
+- 42: 상태 진행, 담당 cursor, 막힘 없음
+- 46: 상태 진행, 담당 cursor, 막힘 없음
+# 상태 46
+
+## 지금 상태
+
+start-context를 11회 재서 중간값과 글자 수를 `.team/sessions/42/measure.txt`에 남긴다. 로그인 세션 첫 답 확인은 아직 하지 않았다.
+
+## 결정
+
+- 임시 상한 4,000자, 2,000자, 로그 200줄, 훅 10초는 이 측정으로 바꾸지 않는다. 측정값이 그 안에 있으면 그대로 둔다.
+- 로그인 세션 3회 확인은 HR P 게이트다. 칸만 만들고 채우지 않는다.
+- 이 환경에 Codex CLI가 없다. 사용자 PC 버전은 확인하지 못했다.
+- 이 세션 로그의 도구 칸은 `Cursor`다.
+
+## 다음 할 일
+
+HR P가 Claude Code와 Codex에서 새 세션, /compact 뒤, 도구 전환을 각 3회 하고, 첫 답의 작업 이름과 다음 할 일을 `.team/sessions/42/login-gate.md`에 적는다.
+stdout_end
+---
+args ['--switch'] env {'GITHUB_HEAD_REF': 'work-46'}
+exit_ok True
+chars 616 stable True
+median_s 0.040891
+min_s 0.040414 max_s 0.042319
+runs 0.040414 0.040891 0.041145 0.040764 0.041046 0.040847 0.040947 0.040845 0.040971 0.040671 0.042319
+stdout_begin
+- 42: 상태 진행, 담당 cursor, 막힘 없음
+- 46: 상태 진행, 담당 cursor, 막힘 없음
+# 상태 46
+
+## 지금 상태
+
+start-context를 11회 재서 중간값과 글자 수를 `.team/sessions/42/measure.txt`에 남긴다. 로그인 세션 첫 답 확인은 아직 하지 않았다.
+
+## 결정
+
+- 임시 상한 4,000자, 2,000자, 로그 200줄, 훅 10초는 이 측정으로 바꾸지 않는다. 측정값이 그 안에 있으면 그대로 둔다.
+- 로그인 세션 3회 확인은 HR P 게이트다. 칸만 만들고 채우지 않는다.
+- 이 환경에 Codex CLI가 없다. 사용자 PC 버전은 확인하지 못했다.
+- 이 세션 로그의 도구 칸은 `Cursor`다.
+
+## 다음 할 일
+
+HR P가 Claude Code와 Codex에서 새 세션, /compact 뒤, 도구 전환을 각 3회 하고, 첫 답의 작업 이름과 다음 할 일을 `.team/sessions/42/login-gate.md`에 적는다.
+
+도구는 `Claude Code` 또는 `Codex`다.
+종류는 시작, go, 종료, push, 재개 중 하나다.
+
+예: `2026-11-26T00:00:00Z Codex go 계획 승인`
+stdout_end
+---
