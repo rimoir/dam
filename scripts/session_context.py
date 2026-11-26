@@ -161,6 +161,53 @@ def set_mode(root: Path, branch: str, name: str) -> str:
     return replacement
 
 
+def _status_path(line: str) -> str:
+    body = line[3:]
+    if " -> " in body:
+        body = body.split(" -> ", 1)[1]
+    if len(body) >= 2 and body.startswith('"') and body.endswith('"'):
+        body = body[1:-1]
+    return body
+
+
+def code_dirty_paths(root: Path) -> list[str]:
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        raise SystemExit(f"git status가 실패했다: {exc}") from exc
+    if done.returncode != 0:
+        raise SystemExit("git status가 실패했다")
+    found: list[str] = []
+    for line in done.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        path = _status_path(line)
+        if path == ".team" or path.startswith(".team/"):
+            continue
+        found.append(path)
+    return found
+
+
+def append_result(root: Path, branch: str, text: str) -> bool:
+    issue_id = issue_id_from_branch(branch)
+    open_ids = {work_id for work_id, _line in open_board_lines(root)}
+    if issue_id is None or issue_id not in open_ids:
+        return False
+    path = root / ".team" / "sessions" / issue_id / "result.md"
+    if not path.is_file():
+        return False
+    original = path.read_text(encoding="utf-8")
+    if original and not original.endswith("\n"):
+        original += "\n"
+    path.write_text(original + text, encoding="utf-8")
+    return True
+
+
 def text_line_errors(root: Path) -> list[str]:
     errors: list[str] = []
     rule = root / RULE_REL

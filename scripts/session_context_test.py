@@ -490,5 +490,60 @@ class LineLimitTest(unittest.TestCase):
         self.assertIn("51", proc.stderr)
 
 
+class CodeCleanTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        subprocess.run(["git", "init"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=self.root, check=True)
+        script = self.root / "scripts"
+        script.mkdir()
+        (script / "ok.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "scripts/ok.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=self.root, check=True, capture_output=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        return subprocess.run(
+            ["python3", str(SCRIPT), *args],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_code_clean_ignores_team_and_fails_on_code(self) -> None:
+        notes = self.root / ".team" / "sessions" / "66"
+        notes.mkdir(parents=True)
+        (notes / "result.md").write_text("노트\n", encoding="utf-8")
+        clean = self._run("code-clean")
+        self.assertEqual(clean.returncode, 0, clean.stderr)
+        (self.root / "scripts" / "ok.py").write_text("x = 2\n", encoding="utf-8")
+        dirty = self._run("code-clean")
+        self.assertEqual(dirty.returncode, 1, dirty.stdout)
+        self.assertIn("scripts/ok.py", dirty.stderr)
+
+    def test_result_is_written_only_for_an_open_task(self) -> None:
+        from session_context import append_result
+
+        bare = append_result(self.root, "cursor/no-number", "결론: 없다\n근거: 파일\n")
+        self.assertFalse(bare)
+        self.assertFalse((self.root / ".team").exists())
+        write_board(self.root, [board_line("66", "시작")])
+        folder = self.root / ".team" / "sessions" / "66"
+        folder.mkdir(parents=True)
+        (folder / "result.md").write_text("# 결과 66\n", encoding="utf-8")
+        wrote = append_result(self.root, "work-66", "결론: 원인\n근거: 로그\n")
+        self.assertTrue(wrote)
+        text = (folder / "result.md").read_text(encoding="utf-8")
+        self.assertIn("결론: 원인", text)
+        self.assertIn("근거: 로그", text)
+
+
 if __name__ == "__main__":
     unittest.main()
