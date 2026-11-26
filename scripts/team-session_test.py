@@ -575,5 +575,136 @@ class IssueStartTest(unittest.TestCase):
         self.assertIsNone(tracker_mod.github_slug("https://gitlab.com/rimoir/dam.git"))
 
 
+def install_pr_gh(root: Path) -> Path:
+    bindir = root / "prbin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    script = bindir / "gh"
+    script.write_text(
+        """#!/usr/bin/env python3
+import os
+import sys
+
+log_path = os.environ.get("GH_LOG")
+if log_path:
+    with open(log_path, "a", encoding="utf-8") as handle:
+        handle.write(" ".join(sys.argv[1:]) + "\\n")
+data = sys.stdin.read()
+stdin_path = os.environ.get("GH_STDIN")
+if stdin_path:
+    with open(stdin_path, "w", encoding="utf-8") as handle:
+        handle.write(data)
+failed = os.environ.get("GH_FAIL")
+if failed:
+    sys.stderr.write(failed)
+    if not failed.endswith("\\n"):
+        sys.stderr.write("\\n")
+    sys.exit(1)
+args = sys.argv[1:]
+if len(args) >= 2 and args[0] == "pr" and args[1] == "create":
+    sys.stdout.write("https://github.com/rimoir/dam/pull/99\\n")
+    sys.exit(0)
+sys.stderr.write("거절된 gh 호출\\n")
+sys.exit(3)
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return bindir
+
+
+def pull(root: Path, *args: str, gh_fail: str | None = None) -> subprocess.CompletedProcess[str]:
+    bindir = install_pr_gh(root)
+    env = os.environ.copy()
+    env["TEAM_ROOT"] = str(root)
+    env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+    env["GH_LOG"] = str(root / "gh.log")
+    env["GH_STDIN"] = str(root / "gh-stdin.txt")
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.pop("GH_FAIL", None)
+    if gh_fail is not None:
+        env["GH_FAIL"] = gh_fail
+    return subprocess.run(
+        ["python3", str(SCRIPT), "pull", *args],
+        cwd=root,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+
+class PullLogTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        folder = self.root / ".team" / "sessions" / "31"
+        folder.mkdir(parents=True)
+        self.log = folder / "log.md"
+        self.log.write_text("# 로그 31\n\n", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_pull_body_has_issue_link_and_log_has_url(self) -> None:
+        result = pull(self.root, "31", "--title", "제목", "--tool", "Codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = (self.root / "gh-stdin.txt").read_text(encoding="utf-8")
+        self.assertIn("https://github.com/rimoir/dam/issues/31", body)
+        self.assertNotIn("pull/99", body)
+        log_lines = [
+            line
+            for line in self.log.read_text(encoding="utf-8").splitlines()
+            if line.startswith("20")
+        ]
+        self.assertEqual(len(log_lines), 1)
+        self.assertRegex(
+            log_lines[0],
+            r"^20\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ Codex push https://github.com/rimoir/dam/pull/99$",
+        )
+        gh_log = (self.root / "gh.log").read_text(encoding="utf-8")
+        self.assertIn("pr create", gh_log)
+        self.assertNotIn("issue comment", gh_log)
+        self.assertNotIn("api ", gh_log)
+
+    def test_second_pull_appends_a_line(self) -> None:
+        first = pull(self.root, "31", "--title", "제목", "--tool", "Claude Code")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        before = self.log.read_text(encoding="utf-8")
+        second = pull(self.root, "31", "--title", "제목", "--tool", "Claude Code")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        after = self.log.read_text(encoding="utf-8")
+        self.assertTrue(after.startswith(before))
+        added = [line for line in after[len(before) :].splitlines() if line]
+        self.assertEqual(len(added), 1)
+        self.assertIn("Claude Code push https://github.com/rimoir/dam/pull/99", added[0])
+
+    def test_failed_open_does_not_change_log(self) -> None:
+        before = self.log.read_bytes()
+        result = pull(self.root, "31", "--title", "제목", "--tool", "Codex", gh_fail="pr create failed")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("쓰지 못했다", result.stderr)
+        self.assertEqual(self.log.read_bytes(), before)
+        self.assertNotIn("ghp_", result.stderr)
+
+    def test_missing_log_does_not_call_gh(self) -> None:
+        self.log.unlink()
+        result = pull(self.root, "31", "--title", "제목", "--tool", "Codex")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / "gh.log").exists())
+        self.assertFalse(self.log.exists())
+
+    def test_date_id_and_bad_tool_do_not_call_gh(self) -> None:
+        date = pull(self.root, "2026-11-26-memo", "--title", "제목", "--tool", "Codex")
+        self.assertNotEqual(date.returncode, 0)
+        bad = pull(self.root, "31", "--title", "제목", "--tool", "Cursor")
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertFalse((self.root / "gh.log").exists())
+
+    def test_new_does_not_open_a_pull(self) -> None:
+        created = run(self.root, "new", "32")
+        self.assertEqual(created.returncode, 0, created.stderr)
+        viewed = (self.root / "gh.log").read_text(encoding="utf-8")
+        self.assertNotIn("pr create", viewed)
+
+
 if __name__ == "__main__":
     unittest.main()
