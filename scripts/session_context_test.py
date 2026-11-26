@@ -11,9 +11,12 @@ from pathlib import Path
 
 from session_context import (
     INJECT_LIMIT,
+    LOG_LINE_LIMIT,
     SHORTEN_LINE,
     STATE_LIMIT,
+    limit_errors,
     render_start_context,
+    rotate_log,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -249,6 +252,119 @@ class StartContextTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(self.state, result.stdout)
         self.assertNotIn("다른 작업 상태", result.stdout)
+
+
+class LogLimitTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _log(self, work_id: str, text: str) -> Path:
+        folder = self.root / ".team" / "sessions" / work_id
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / "log.md"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_rotate_moves_the_prefix_unchanged(self) -> None:
+        original = "".join(f"L{i:04d}\n" for i in range(250))
+        path = self._log("44", original)
+        archive = rotate_log(self.root, "44")
+        self.assertIsNotNone(archive)
+        moved = archive.read_text(encoding="utf-8")
+        live = path.read_text(encoding="utf-8")
+        self.assertTrue(live.startswith("이전: log/001.md\n"))
+        kept = live[len("이전: log/001.md\n") :]
+        self.assertEqual(moved + kept, original)
+        self.assertLessEqual(len(live.splitlines()), LOG_LINE_LIMIT)
+        self.assertIn("L0000\n", moved)
+        self.assertNotIn("L0000\n", live)
+        self.assertIn("L0249\n", live)
+        first = moved
+        path.write_text(live + "".join(f"N{i:02d}\n" for i in range(10)), encoding="utf-8")
+        second = rotate_log(self.root, "44")
+        self.assertEqual(second.name, "002.md")
+        self.assertEqual(archive.read_text(encoding="utf-8"), first)
+
+    def test_rotate_under_limit_is_noop(self) -> None:
+        original = "".join(f"L{i}\n" for i in range(10))
+        path = self._log("44", original)
+        self.assertIsNone(rotate_log(self.root, "44"))
+        self.assertEqual(path.read_text(encoding="utf-8"), original)
+        self.assertFalse((path.parent / "log").exists())
+
+    def test_rotate_rejects_path_escape(self) -> None:
+        outside = self.root / "outside.md"
+        with self.assertRaises(SystemExit):
+            rotate_log(self.root, "../outside")
+        self.assertFalse(outside.exists())
+
+    def test_check_fails_when_state_or_log_is_over_limit(self) -> None:
+        folder = self.root / ".team" / "sessions" / "44"
+        folder.mkdir(parents=True)
+        (folder / "state.md").write_text("가" * (STATE_LIMIT + 1), encoding="utf-8")
+        (folder / "log.md").write_text("줄\n" * (LOG_LINE_LIMIT + 1), encoding="utf-8")
+        errors = "\n".join(limit_errors(self.root, "work-44"))
+        self.assertIn("44", errors)
+        self.assertIn(str(STATE_LIMIT), errors)
+        self.assertIn(str(LOG_LINE_LIMIT), errors)
+
+    def test_check_ignores_notes_folder_and_passes_small_files(self) -> None:
+        notes = self.root / ".team" / "sessions" / "12"
+        notes.mkdir(parents=True)
+        (notes / "notes.md").write_text("가" * (STATE_LIMIT + 50), encoding="utf-8")
+        self._log("44", "한 줄\n")
+        (self.root / ".team" / "sessions" / "44" / "state.md").write_text("다음 할 일\n", encoding="utf-8")
+        self.assertEqual(limit_errors(self.root, "work-44"), [])
+
+    def test_check_fails_when_injection_exceeds_limit(self) -> None:
+        line = "- 44: 상태 시작, 담당 dev, 막힘 " + ("나" * (INJECT_LIMIT + 1))
+        write_board(self.root, [line])
+        self._log("44", "한 줄\n")
+        (self.root / ".team" / "sessions" / "44" / "state.md").write_text("짧은 상태\n", encoding="utf-8")
+        errors = "\n".join(limit_errors(self.root, "work-44"))
+        self.assertIn(str(INJECT_LIMIT), errors)
+        self.assertNotIn(str(STATE_LIMIT + 1), errors)
+
+    def test_cli_rotate_and_check(self) -> None:
+        original = "".join(f"L{i:04d}\n" for i in range(LOG_LINE_LIMIT + 5))
+        path = self._log("44", original)
+        (path.parent / "state.md").write_text("상태\n", encoding="utf-8")
+        write_board(self.root, ["- 44: 상태 시작, 담당 dev, 막힘 없음"])
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["GITHUB_HEAD_REF"] = "work-44"
+        before = subprocess.run(
+            ["python3", str(SCRIPT), "check"],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(before.returncode, 1, before.stdout)
+        self.assertIn("44", before.stderr)
+        rotated = subprocess.run(
+            ["python3", str(SCRIPT), "rotate", "44"],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(rotated.returncode, 0, rotated.stderr)
+        after = subprocess.run(
+            ["python3", str(SCRIPT), "check"],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(after.returncode, 0, after.stderr)
+        live = path.read_text(encoding="utf-8")
+        archive = (path.parent / "log" / "001.md").read_text(encoding="utf-8")
+        self.assertEqual(archive + live[len("이전: log/001.md\n") :], original)
 
 
 if __name__ == "__main__":
