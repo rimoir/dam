@@ -20,6 +20,7 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+from issue_tracker import redact  # noqa: E402
 from session_context import (  # noqa: E402
     _named_section,
     _plan_path,
@@ -33,13 +34,7 @@ KNOWN = frozenset({"native", "fake"})
 HANDLE = re.compile(r"^(native|fake)-[0-9]+$")
 WORKER_LIMIT = 3  # 임시. 측정 뒤 고친다.
 STALL_LIMIT_SECONDS = 900  # 임시. 측정 뒤 고친다.
-_SECRET = re.compile(
-    r"ghp_[A-Za-z0-9]{36}"
-    r"|github_pat_[A-Za-z0-9_]{20,}"
-    r"|sk-[A-Za-z0-9]{20,}"
-    r"|xox[baprs]-[A-Za-z0-9-]{10,}"
-    r"|AKIA[0-9A-Z]{16}"
-)
+_NOTE_SUFFIXES = {".md", ".txt", ".json"}
 
 
 class OrchestratorError(Exception):
@@ -175,14 +170,13 @@ def admit_work(
     done = set(finished or [])
     for name in names:
         dep = by_name[name][1].strip()
-        if not dep or dep == "없음":
+        if not dep or dep == "없음" or dep in done:
             continue
-        if dep in names or dep not in done:
-            return blank(
-                ok="아니오",
-                state="거부",
-                reason=f"앞 단위 결과가 입력이다: {dep}",
-            )
+        return blank(
+            ok="아니오",
+            state="거부",
+            reason=f"앞 단위 결과가 입력이다: {dep}",
+        )
     if running + len(names) > WORKER_LIMIT:
         return blank(
             ok="아니오",
@@ -192,6 +186,58 @@ def admit_work(
     return blank(ok="예", state="허용", line=" ".join(names))
 
 
+def _ready_names(root: Path, work_id: str, finished: list[str] | None) -> list[str] | dict[str, str]:
+    folder = root / ".team" / "sessions" / work_id
+    task_path = folder / "task.md"
+    if not task_path.is_file():
+        return blank(ok="아니오", state="거부", reason=f"task.md가 없다: {work_id}")
+    log_path = folder / "log.md"
+    log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
+    if not log_has_go(log_text):
+        return blank(ok="아니오", state="거부", reason="go 없는 작업이다")
+    units = read_plan_units(task_path.read_text(encoding="utf-8"))
+    if not units:
+        return blank(ok="아니오", state="거부", reason="계획 단위가 없다")
+    done = set(finished or [])
+    ready: list[str] = []
+    blocked = ""
+    for name, dep, _files, _check in units:
+        if name in done:
+            continue
+        dep = dep.strip()
+        if dep and dep != "없음" and dep not in done:
+            blocked = f"앞 단위 결과가 입력이다: {dep}"
+            continue
+        ready.append(name)
+    if not ready:
+        return blank(ok="아니오", state="거부", reason=blocked or "계획 단위가 없다")
+    return ready
+
+
+def work_owning_unit(root: Path, unit: str) -> str | None:
+    sessions = root / ".team" / "sessions"
+    if not sessions.is_dir():
+        return None
+    found: list[str] = []
+    for folder in sorted(path for path in sessions.iterdir() if path.is_dir()):
+        task = folder / "task.md"
+        if not task.is_file():
+            continue
+        try:
+            text = task.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        for name, _dep, _files, _check in read_plan_units(text):
+            if name == unit:
+                found.append(folder.name)
+                break
+    if len(found) > 1:
+        return "*"
+    if len(found) == 1:
+        return found[0]
+    return None
+
+
 def start_work(
     root: Path,
     work_id: str,
@@ -199,6 +245,11 @@ def start_work(
     selected: list[str] | None = None,
     finished: list[str] | None = None,
 ) -> dict[str, str]:
+    if selected is None:
+        ready = _ready_names(root, work_id, finished)
+        if isinstance(ready, dict):
+            return ready
+        selected = ready
     decision = admit_work(
         root,
         work_id,
@@ -374,7 +425,22 @@ def resume_parallel(root: Path) -> str:
 
 
 def redact_secret(text: str) -> str:
-    return _SECRET.sub("숨김", text)
+    return redact(text)
+
+
+def scrub_notes(folder: Path) -> None:
+    if not folder.is_dir():
+        return
+    for path in folder.iterdir():
+        if not path.is_file() or path.suffix not in _NOTE_SUFFIXES:
+            continue
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        cleaned = redact(raw)
+        if cleaned != raw:
+            path.write_text(cleaned, encoding="utf-8")
 
 
 def judge(
@@ -429,6 +495,7 @@ def collect_work(root: Path, work_id: str, exit_code: int = 0) -> dict[str, str]
         (folder / "worker-out.txt").write_text(line + "\n", encoding="utf-8")
     state = state_path.read_text(encoding="utf-8") if state_path.is_file() else ""
     kind = judge(exit_code, line, next_action_updated(state))
+    scrub_notes(folder)
     return blank(ok="예", state=kind, line=line)
 
 
@@ -454,6 +521,7 @@ def main(argv: list[str] | None = None) -> int:
     start_cmd.add_argument("--unit", default="")
     start_cmd.add_argument("--work", default="")
     start_cmd.add_argument("--running", type=int, default=0)
+    start_cmd.add_argument("--finished", action="append", default=[])
     admit_cmd = sub.add_parser("admit", help="시작 전 검사를 읽고 허용 또는 거부를 낸다.")
     admit_cmd.add_argument("--work", required=True)
     admit_cmd.add_argument("--running", type=int, default=0)
@@ -487,9 +555,28 @@ def main(argv: list[str] | None = None) -> int:
     root = notes_root(args.root or None)
     try:
         if args.command == "start" and args.work:
-            record = start_work(root, args.work, running=args.running)
+            chosen = [args.unit] if args.unit else None
+            record = start_work(
+                root,
+                args.work,
+                running=args.running,
+                selected=chosen,
+                finished=args.finished or None,
+            )
         elif args.command == "start":
-            record = start(root, args.unit)
+            owner = work_owning_unit(root, args.unit) if args.unit else None
+            if owner == "*":
+                record = blank(ok="아니오", state="거부", reason="단위가 여러 작업에 있다")
+            elif owner:
+                record = start_work(
+                    root,
+                    owner,
+                    running=args.running,
+                    selected=[args.unit],
+                    finished=args.finished or None,
+                )
+            else:
+                record = start(root, args.unit)
         elif args.command == "admit":
             record = admit_work(
                 root,
