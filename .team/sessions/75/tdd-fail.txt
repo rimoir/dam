@@ -1,0 +1,4 @@
+실패 검사 커밋 484de6a44fd7cbf11a67a59c327e5b352e62d6a2
+python3 scripts/orchestrator_test.py
+Ran 22 tests FAILED (failures=1, errors=4)
+judge 는 invalid choice

@@ -13,18 +13,27 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from session_context import _plan_path, log_has_go, read_plan_units  # noqa: E402
+from session_context import _named_section, _plan_path, log_has_go, read_plan_units  # noqa: E402
 
 FIELDS = ("ok", "handle", "state", "line", "reason")
 KNOWN = frozenset({"native", "fake"})
 HANDLE = re.compile(r"^(native|fake)-[0-9]+$")
 WORKER_LIMIT = 3  # 임시. 측정 뒤 고친다.
+STALL_LIMIT_SECONDS = 900  # 임시. 측정 뒤 고친다.
+_SECRET = re.compile(
+    r"ghp_[A-Za-z0-9]{36}"
+    r"|github_pat_[A-Za-z0-9_]{20,}"
+    r"|sk-[A-Za-z0-9]{20,}"
+    r"|xox[baprs]-[A-Za-z0-9-]{10,}"
+    r"|AKIA[0-9A-Z]{16}"
+)
 
 
 class OrchestratorError(Exception):
@@ -350,6 +359,65 @@ def worker_brief(repo: Path, work_id: str) -> str:
     return "\n".join(chunks)
 
 
+def redact_secret(text: str) -> str:
+    return _SECRET.sub("숨김", text)
+
+
+def judge(
+    exit_code: int,
+    result_line: str,
+    next_updated: bool,
+    turn_failed: bool = False,
+) -> str:
+    if exit_code != 0 or turn_failed:
+        return "실패"
+    line = result_line.strip()
+    if line.startswith("ISSUES") or line.startswith("BLOCKED"):
+        return "문제"
+    if not line or line == "(아직 없음)":
+        return "미완"
+    if line.startswith("PASS") and next_updated:
+        return "성공"
+    return "미완"
+
+
+def stall_notice(alive: bool, last_log: datetime, now: datetime) -> str:
+    if alive and (now - last_log).total_seconds() > STALL_LIMIT_SECONDS:
+        return "멈춤 의심"
+    return ""
+
+
+def result_section_line(text: str) -> str:
+    for raw in _named_section(text, "## 결과").splitlines():
+        line = raw.strip()
+        if line:
+            return line
+    return ""
+
+
+def next_action_updated(state_text: str) -> bool:
+    section = _named_section(state_text, "## 다음 할 일").strip()
+    if not section or "계획을 채운 뒤" in section:
+        return False
+    return True
+
+
+def collect_work(root: Path, work_id: str, exit_code: int = 0) -> dict[str, str]:
+    folder = root / ".team" / "sessions" / work_id
+    result_path = folder / "result.md"
+    state_path = folder / "state.md"
+    raw = result_path.read_text(encoding="utf-8") if result_path.is_file() else ""
+    cleaned = redact_secret(raw)
+    if result_path.is_file() and cleaned != raw:
+        result_path.write_text(cleaned, encoding="utf-8")
+    line = result_section_line(cleaned)
+    if folder.is_dir():
+        (folder / "worker-out.txt").write_text(line + "\n", encoding="utf-8")
+    state = state_path.read_text(encoding="utf-8") if state_path.is_file() else ""
+    kind = judge(exit_code, line, next_action_updated(state))
+    return blank(ok="예", state=kind, line=line)
+
+
 def guarded_write(worktree: Path, relative: str, data: str) -> dict[str, str]:
     root = worktree.resolve()
     target = (root / relative).resolve()
@@ -383,10 +451,22 @@ def main(argv: list[str] | None = None) -> int:
     prepare_cmd.add_argument("--session", default="cursor")
     brief_cmd = sub.add_parser("brief", help="task.md와 상태 파일만 낸다.")
     brief_cmd.add_argument("--work", required=True)
+    judge_cmd = sub.add_parser("judge", help="끝남 넷 중 하나를 낸다.")
+    judge_cmd.add_argument("--exit", type=int, required=True)
+    judge_cmd.add_argument("--line", default="")
+    judge_cmd.add_argument("--next-updated", action="store_true")
+    judge_cmd.add_argument("--turn-failed", action="store_true")
+    collect_cmd = sub.add_parser("collect-work", help="결과 칸 한 줄만 거둔다.")
+    collect_cmd.add_argument("--work", required=True)
+    stall_cmd = sub.add_parser("stall", help="살아 있는데 로그가 오래되면 알린다.")
+    stall_cmd.add_argument("--last", required=True)
+    stall_cmd.add_argument("--now", required=True)
+    stall_cmd.add_argument("--alive", action="store_true")
     poll_cmd = sub.add_parser("poll", help="핸들의 상태를 읽는다.")
     poll_cmd.add_argument("--handle", required=True)
     collect_cmd = sub.add_parser("collect", help="결과 한 줄을 읽는다.")
-    collect_cmd.add_argument("--handle", required=True)
+    collect_cmd.add_argument("--handle", default="")
+    collect_cmd.add_argument("--work", default="")
     args = parser.parse_args(argv)
     root = notes_root(args.root or None)
     try:
@@ -427,6 +507,16 @@ def main(argv: list[str] | None = None) -> int:
             text = worker_brief(root, args.work)
             sys.stdout.write(text if text.endswith("\n") else text + "\n")
             return 0
+        elif args.command == "judge":
+            kind = judge(args.exit, args.line, args.next_updated, args.turn_failed)
+            record = blank(ok="예", state=kind, line=redact_secret(args.line))
+        elif args.command == "stall":
+            last = datetime.fromisoformat(args.last.replace("Z", "+00:00"))
+            now = datetime.fromisoformat(args.now.replace("Z", "+00:00"))
+            notice = stall_notice(args.alive, last, now)
+            record = blank(ok="예", state=notice or "괜찮음", line=notice)
+        elif args.command == "collect-work" or (args.command == "collect" and args.work):
+            record = collect_work(root, args.work)
         elif args.command == "poll":
             record = poll(root, args.handle)
         else:
