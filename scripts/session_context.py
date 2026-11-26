@@ -299,6 +299,62 @@ def plan_check(root: Path, work_id: str) -> tuple[list[str], str]:
     return errors, notice
 
 
+def _state_for_open_work(root: Path, branch: str) -> Path:
+    issue_id = issue_id_from_branch(branch)
+    open_ids = {work_id for work_id, _line in open_board_lines(root)}
+    if issue_id is None or issue_id not in open_ids:
+        raise SystemExit("열린 작업이 없다")
+    state = root / ".team" / "sessions" / issue_id / "state.md"
+    if not state.is_file():
+        raise SystemExit("상태 파일이 없다")
+    return state
+
+
+def begin_resume(root: Path, branch: str) -> str:
+    state = _state_for_open_work(root, branch)
+    first, ending, rest = _split_first_line(state.read_bytes())
+    current = first.decode("utf-8")
+    previous = current.split(":", 1)[1].strip() if current.startswith("모드:") else ""
+    if previous == "이어받기":
+        state.write_bytes(f"모드: 이어받기".encode("utf-8") + ending + rest)
+        return "모드: 이어받기\n"
+    marker = f"이전 모드: {previous}".encode("utf-8")
+    rest_text = rest
+    if rest.startswith("이전 모드:".encode("utf-8")):
+        _old, old_end, rest_text = _split_first_line(rest)
+        ending_keep = old_end or ending
+        rest = rest_text
+        ending = ending_keep
+    state.write_bytes(
+        "모드: 이어받기".encode("utf-8") + ending + marker + ending + rest
+    )
+    return "모드: 이어받기\n"
+
+
+def end_resume(root: Path, branch: str) -> str:
+    state = _state_for_open_work(root, branch)
+    raw = state.read_bytes()
+    lines = []
+    blob = raw
+    previous = ""
+    while blob:
+        line, ending, blob = _split_first_line(blob)
+        text = line.decode("utf-8")
+        if text.startswith("이전 모드:") and not previous:
+            previous = text.split(":", 1)[1].strip()
+            continue
+        lines.append(line + (ending if blob or ending == b"\n" or ending == b"\r\n" else b""))
+        if not blob and not ending:
+            break
+        if not blob:
+            break
+    if not previous:
+        raise SystemExit("이전 모드가 없다")
+    # rebuild without the previous-mode line, preserving endings already in lines
+    state.write_bytes(b"".join(lines) if lines else b"")
+    return set_mode(root, branch, previous)
+
+
 def text_line_errors(root: Path) -> list[str]:
     errors: list[str] = []
     rule = root / RULE_REL
