@@ -97,7 +97,7 @@ python3 scripts/team-session.py board
 
 ## 검사
 
-main으로 가는 pull request와 main push에서 같은 검사 세 개가 돈다. 로컬에서도 같은 명령을 쓴다. Node.js는 `22.22.0` 이상이다.
+main으로 가는 pull request와 main push에서 같은 검사 세 개가 돈다. 로컬에서도 같은 명령을 쓴다. Node.js는 `22.22.0` 이상이다. 같은 검사를 고른 브랜치에서 손으로 다시 돌리려면 `gh workflow run ci.yml --ref <branch>`를 쓴다.
 
 테스트:
 
