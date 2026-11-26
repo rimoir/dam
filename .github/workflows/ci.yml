@@ -21,6 +21,7 @@ jobs:
         run: |
           python3 scripts/team-session_test.py
           python3 scripts/session_context_test.py
+          python3 scripts/team-session.py check
 
   rulesync-regen:
     name: rulesync regen

@@ -10,7 +10,11 @@ from pathlib import Path
 
 INJECT_LIMIT = 4000
 STATE_LIMIT = 2000
+LOG_LINE_LIMIT = 200
 SHORTEN_LINE = "상한을 넘었다. 상태 파일 또는 시작 주입을 줄여라.\n"
+WORK_ID = re.compile(
+    r"^(?:[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(?:-[a-z0-9]+)*)$"
+)
 CLOSED = frozenset({"완료", "닫힘"})
 BOARD_LINE = re.compile(
     r"^- (?P<id>\S+): 상태 (?P<status>[^,]+), 담당 [^,]+, 막힘 .*$"
@@ -67,7 +71,7 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def render_start_context(root: Path, branch: str, switch: bool = False) -> str:
+def assembled_start_context(root: Path, branch: str, switch: bool = False) -> tuple[str, int]:
     lines = open_board_lines(root)
     open_ids = {work_id for work_id, _line in lines}
     issue_id = issue_id_from_branch(branch)
@@ -90,7 +94,63 @@ def render_start_context(root: Path, branch: str, switch: bool = False) -> str:
             if chunks and not "".join(chunks).endswith("\n"):
                 chunks.append("\n")
             chunks.append(tail if tail.endswith("\n") else tail + "\n")
-    body = "".join(chunks)
-    if len(state_text) > STATE_LIMIT or len(body) > INJECT_LIMIT:
+    return "".join(chunks), len(state_text)
+
+
+def render_start_context(root: Path, branch: str, switch: bool = False) -> str:
+    body, state_len = assembled_start_context(root, branch, switch)
+    if state_len > STATE_LIMIT or len(body) > INJECT_LIMIT:
         return SHORTEN_LINE
     return body
+
+
+def rotate_log(root: Path, work_id: str) -> Path | None:
+    if WORK_ID.fullmatch(work_id) is None:
+        raise SystemExit(f"작업ID 형식이 아니다: {work_id}")
+    path = root / ".team" / "sessions" / work_id / "log.md"
+    if not path.is_file():
+        raise SystemExit(f"log.md가 없다: {work_id}")
+    original = path.read_bytes()
+    lines = original.decode("utf-8").splitlines(keepends=True)
+    if len(lines) <= LOG_LINE_LIMIT:
+        return None
+    keep = LOG_LINE_LIMIT - 1
+    moved = "".join(lines[:-keep]).encode("utf-8")
+    kept = "".join(lines[-keep:])
+    if original != moved + kept.encode("utf-8"):
+        raise SystemExit("로그 앞부분을 그대로 옮기지 못한다")
+    archive_dir = path.parent / "log"
+    archive_dir.mkdir(exist_ok=True)
+    number = 1
+    while (archive_dir / f"{number:03d}.md").exists():
+        number += 1
+    archive = archive_dir / f"{number:03d}.md"
+    archive.write_bytes(moved)
+    path.write_text(f"이전: log/{number:03d}.md\n{kept}", encoding="utf-8")
+    return archive
+
+
+def limit_errors(root: Path, branch: str) -> list[str]:
+    errors: list[str] = []
+    sessions = root / ".team" / "sessions"
+    if sessions.is_dir():
+        for folder in sorted(path for path in sessions.iterdir() if path.is_dir()):
+            state = folder / "state.md"
+            if not state.is_file():
+                continue
+            text = state.read_text(encoding="utf-8")
+            if len(text) > STATE_LIMIT:
+                errors.append(
+                    f"상태 파일이 {STATE_LIMIT}자를 넘는다: {folder.name} ({len(text)})"
+                )
+            log = folder / "log.md"
+            if log.is_file():
+                count = len(log.read_text(encoding="utf-8").splitlines())
+                if count > LOG_LINE_LIMIT:
+                    errors.append(
+                        f"로그가 {LOG_LINE_LIMIT}줄을 넘는다: {folder.name} ({count})"
+                    )
+    body, _state_len = assembled_start_context(root, branch, False)
+    if len(body) > INJECT_LIMIT:
+        errors.append(f"시작 주입이 {INJECT_LIMIT}자를 넘는다: {len(body)}")
+    return errors

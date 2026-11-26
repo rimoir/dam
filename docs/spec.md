@@ -13,3 +13,5 @@
 ## 세션 시작
 
 `python3 scripts/team-session.py start-context`는 `.team/board.md`의 열린 줄과, 브랜치 이름이 이슈 번호로 끝날 때 그 작업 하나의 `state.md`만 낸다. 번호가 없으면 열린 줄만 낸다. 상태 `완료`와 `닫힘`은 열린 줄이 아니다. 도구를 바꿀 때는 `start-context --switch`로 그 로그의 마지막 5줄만 더하고, 로그 전체는 넣지 않는다. 시작 주입 4,000자 또는 상태 파일 2,000자를 넘으면 본문 대신 줄이라는 한 줄만 낸다. 이 값은 측정 전 임시 상한이다. `summary`는 state.md만 내는 호환 명령으로 남는다.
+
+`python3 scripts/team-session.py rotate <작업ID>`는 log.md가 200줄을 넘으면 앞부분을 `.team/sessions/<작업ID>/log/001.md`로 옮기고, log.md에는 최근 줄과 `이전: log/001.md`만 남긴다. 옮긴 내용은 바꾸지 않는다. 다시 넘으면 `002.md`다. `python3 scripts/team-session.py check`는 상태 파일 2,000자, 시작 주입 4,000자, 로그 200줄을 넘기면 실패한다. `notes.md`만 있는 폴더는 보지 않는다. 로그 200줄도 측정 전 임시 상한이다.
