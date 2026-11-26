@@ -236,7 +236,16 @@ class GithubIssueTracker:
 
     def read_status(self, number: int) -> WorkView:
         issue = self._read_json(
-            ["gh", "issue", "view", str(number), "--repo", self.slug, "--json", "state"],
+            [
+                "gh",
+                "issue",
+                "view",
+                str(number),
+                "--repo",
+                self.slug,
+                "--json",
+                "state,closedByPullRequestsReferences",
+            ],
             "이슈 상태가 아니다",
         )
         if not isinstance(issue, dict) or issue.get("state") not in ("OPEN", "CLOSED"):
@@ -251,7 +260,9 @@ class GithubIssueTracker:
                 "--state",
                 "all",
                 "--limit",
-                "100",
+                "50",
+                "--search",
+                str(number),
                 "--json",
                 "number,state,body,closingIssuesReferences",
             ],
@@ -259,7 +270,8 @@ class GithubIssueTracker:
         )
         if not isinstance(prs, list):
             raise IssueTrackerError("이슈를 읽지 못했다: PR 목록이 아니다")
-        chosen = _matching_pr(prs, number)
+        closed_by = issue.get("closedByPullRequestsReferences") or []
+        chosen = _matching_pr(prs, number, closed_by if isinstance(closed_by, list) else [])
         closed = issue["state"] == "CLOSED"
         if chosen is None:
             return WorkView(issue_closed=closed, pull_state="none", checks="none")
@@ -285,7 +297,7 @@ class GithubIssueTracker:
             raise IssueTrackerError(f"이슈를 읽지 못했다: {why}") from None
 
     def _check_word(self, pr_number: int) -> str:
-        rows = self._read_json(
+        result = self.runner(
             [
                 "gh",
                 "pr",
@@ -295,9 +307,19 @@ class GithubIssueTracker:
                 self.slug,
                 "--json",
                 "name,bucket,state",
-            ],
-            "검사 결과가 아니다",
+            ]
         )
+        stdout = (result.stdout or "").strip()
+        stderr = result.stderr or ""
+        if not stdout and "no checks reported" in stderr.lower():
+            return "pending"
+        if result.code != 0 and not stdout:
+            reason = redact(stderr).strip() or "gh가 실패했다"
+            raise IssueTrackerError(f"이슈를 읽지 못했다: {reason}")
+        try:
+            rows = json.loads(result.stdout) if stdout else []
+        except json.JSONDecodeError:
+            raise IssueTrackerError("이슈를 읽지 못했다: 검사 결과가 아니다") from None
         if not isinstance(rows, list) or not rows:
             return "pending"
         buckets = {
@@ -338,8 +360,19 @@ class GithubIssueTracker:
         return result
 
 
-def _matching_pr(prs: list, number: int) -> dict | None:
-    needle = re.compile(rf"/issues/{number}(?!\d)")
+def _closes_issue(body: str, number: int) -> bool:
+    return re.search(
+        rf"(?i)(?:^|\s)(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#{number}(?!\d)",
+        body,
+    ) is not None
+
+
+def _matching_pr(prs: list, number: int, closed_by: list | None = None) -> dict | None:
+    closed_ids = {
+        item.get("number")
+        for item in (closed_by or [])
+        if isinstance(item, dict)
+    }
     matched: list[dict] = []
     for item in prs:
         if not isinstance(item, dict):
@@ -347,8 +380,17 @@ def _matching_pr(prs: list, number: int) -> dict | None:
         refs = item.get("closingIssuesReferences") or []
         linked = any(isinstance(ref, dict) and ref.get("number") == number for ref in refs)
         body = item.get("body") or ""
-        if linked or (isinstance(body, str) and needle.search(body)):
+        if (
+            linked
+            or item.get("number") in closed_ids
+            or (isinstance(body, str) and _closes_issue(body, number))
+        ):
             matched.append(item)
+    for item in closed_by or []:
+        if isinstance(item, dict) and item.get("number") not in {row.get("number") for row in matched}:
+            merged = dict(item)
+            merged.setdefault("state", "MERGED")
+            matched.append(merged)
     rank = {"OPEN": 0, "MERGED": 1, "CLOSED": 2}
     best: dict | None = None
     best_rank = 9

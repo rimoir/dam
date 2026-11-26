@@ -181,12 +181,7 @@ def github_clause(view: WorkView) -> str:
     return "GitHub 열림"
 
 
-def refresh_board(root: Path, tracker=None) -> None:
-    path = root / ".team" / "board.md"
-    if not path.is_file():
-        raise SystemExit("board.md가 없다")
-    original = path.read_text(encoding="utf-8")
-    active = tracker if tracker is not None else load_tracker(root)
+def _refresh_text(original: str, active) -> str:
     pieces: list[str] = []
     for line in original.splitlines(keepends=True):
         match = _BOARD_ISSUE.match(line.rstrip("\n"))
@@ -198,12 +193,23 @@ def refresh_board(root: Path, tracker=None) -> None:
         view = active.read_status(int(number))
         ending = "\n" if line.endswith("\n") else ""
         pieces.append(f"{prefix}, {github_clause(view)}{ending}")
-    updated = "".join(pieces)
-    if updated == original:
-        return
-    temporary = path.with_name("board.md.tmp")
-    temporary.write_text(updated, encoding="utf-8")
-    temporary.replace(path)
+    return "".join(pieces)
+
+
+def refresh_board(root: Path, tracker=None) -> None:
+    path = root / ".team" / "board.md"
+    if not path.is_file():
+        raise SystemExit("board.md가 없다")
+    active = tracker if tracker is not None else load_tracker(root)
+    with path.open("r+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        original = handle.read()
+        updated = _refresh_text(original, active)
+        if updated == original:
+            return
+        handle.seek(0)
+        handle.write(updated)
+        handle.truncate()
 
 
 def open_work_pr(root: Path, work_id: str, title: str, tool: str, tracker=None) -> str:
