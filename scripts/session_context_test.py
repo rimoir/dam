@@ -110,6 +110,23 @@ class StartContextTest(unittest.TestCase):
         self.assertLessEqual(len(text), INJECT_LIMIT)
         self.assertLessEqual(len(self.state), STATE_LIMIT)
 
+    def test_no_selected_work_names_none_and_open_count(self) -> None:
+        text = render_start_context(self.root, "cursor/no-number", switch=False)
+        self.assertIn("작업: 없음 (열린 줄 3)", text)
+        self.assertNotIn(self.state, text)
+        closed = render_start_context(self.root, "topic-30", switch=False)
+        self.assertIn("작업: 없음 (열린 줄 3)", closed)
+        self.assertNotIn(self.state, closed)
+
+    def test_mode_line_is_carried_and_old_state_still_renders(self) -> None:
+        write_note(self.root, "43", "모드: 조사\n다음 할 일\n", self.log)
+        text = render_start_context(self.root, "work-43", switch=False)
+        self.assertIn("모드: 조사\n", text)
+        self.assertNotIn("작업: 없음", text)
+        plain = render_start_context(self.root, "work-44", switch=False)
+        self.assertIn("다른 작업 상태", plain)
+        self.assertNotIn("작업: 없음", plain)
+
     def test_missing_issue_number_emits_open_lines_only(self) -> None:
         text = render_start_context(self.root, "cursor/no-number", switch=False)
         self.assertIn(board_line("43", "시작"), text)
