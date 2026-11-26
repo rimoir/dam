@@ -432,6 +432,36 @@ class ModeCommandTest(unittest.TestCase):
         )
         self.assertEqual(after, before)
 
+    def test_spaced_mode_name_is_one_argument(self) -> None:
+        result = self._run("작은", "수정", head_ref="work-43")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = (self.root / ".team" / "sessions" / "43" / "state.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertTrue(text.startswith("모드: 작은 수정\n"))
+        self.assertIn("계획을 쓴다\n", text)
+
+    def test_replaces_a_first_line_that_is_not_a_mode(self) -> None:
+        path = self.root / ".team" / "sessions" / "43" / "state.md"
+        path.write_text("# 상태 43\n\n## 지금 상태\nKEEP\n", encoding="utf-8")
+        before_lines = path.read_text(encoding="utf-8").splitlines()
+        result = self._run("기능", head_ref="work-43")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(after[0], "모드: 기능")
+        self.assertEqual(after[1:], before_lines[1:])
+        self.assertNotIn("# 상태 43", after)
+
+    def test_keeps_crlf_on_the_other_lines(self) -> None:
+        path = self.root / ".team" / "sessions" / "43" / "state.md"
+        path.write_bytes("모드: 조사\r\n## 다음 할 일\r\nKEEP\r\n".encode())
+        result = self._run("기능", head_ref="work-43")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            path.read_bytes(),
+            "모드: 기능\r\n## 다음 할 일\r\nKEEP\r\n".encode(),
+        )
+
     def test_no_open_work_creates_nothing(self) -> None:
         bare = Path(self.tmp.name) / "bare"
         bare.mkdir()

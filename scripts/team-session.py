@@ -285,7 +285,7 @@ def main(argv: list[str] | None = None) -> int:
     rotate.add_argument("work_id")
     sub.add_parser("check", help="상태 파일과 로그와 시작 주입 상한을 검사한다.")
     mode = sub.add_parser("mode", help="열린 작업 상태 파일 첫 줄의 모드만 바꾼다.")
-    mode.add_argument("name")
+    mode.add_argument("name", nargs="+")
     sub.add_parser("code-clean", help="코드 파일이 바뀌지 않았는지 읽기만 한다.")
     args = parser.parse_args(argv)
     root = repo_root()
@@ -303,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "rotate":
             rotate_log(root, args.work_id)
         elif args.command == "mode":
-            sys.stdout.write(set_mode(root, current_branch(root), args.name))
+            sys.stdout.write(set_mode(root, current_branch(root), " ".join(args.name)))
         elif args.command == "code-clean":
             dirty = code_dirty_paths(root)
             if dirty:

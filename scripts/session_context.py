@@ -140,6 +140,16 @@ def rotate_log(root: Path, work_id: str) -> Path | None:
     return archive
 
 
+def _split_first_line(raw: bytes) -> tuple[bytes, bytes, bytes]:
+    crlf = raw.find(b"\r\n")
+    lf = raw.find(b"\n")
+    if crlf != -1 and (lf == -1 or crlf < lf):
+        return raw[:crlf], b"\r\n", raw[crlf + 2 :]
+    if lf != -1:
+        return raw[:lf], b"\n", raw[lf + 1 :]
+    return raw, b"\n", b""
+
+
 def set_mode(root: Path, branch: str, name: str) -> str:
     if name not in MODES:
         raise SystemExit(f"모드 이름이 아니다: {name}")
@@ -150,15 +160,9 @@ def set_mode(root: Path, branch: str, name: str) -> str:
     state = root / ".team" / "sessions" / issue_id / "state.md"
     if not state.is_file():
         return "상태 파일이 없다\n"
-    original = state.read_text(encoding="utf-8")
-    lines = original.splitlines(keepends=True)
-    replacement = f"모드: {name}\n"
-    if lines and lines[0].startswith("모드:"):
-        lines[0] = replacement
-    else:
-        lines.insert(0, replacement)
-    state.write_text("".join(lines), encoding="utf-8")
-    return replacement
+    _first, ending, rest = _split_first_line(state.read_bytes())
+    state.write_bytes(f"모드: {name}".encode("utf-8") + ending + rest)
+    return f"모드: {name}\n"
 
 
 def _status_path(line: str) -> str:
