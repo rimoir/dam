@@ -212,6 +212,71 @@ def append_result(root: Path, branch: str, text: str) -> bool:
     return True
 
 
+PLAN_SCREEN = 40
+_PLAN_ROW = re.compile(r"^-\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*$")
+
+
+def _plan_section(text: str) -> str:
+    lines = text.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        if line.strip() == "## 계획":
+            start = index + 1
+            break
+    if start is None:
+        return ""
+    end = len(lines)
+    for index in range(start, len(lines)):
+        if lines[index].startswith("## "):
+            end = index
+            break
+    return "\n".join(lines[start:end])
+
+
+def _has_go(log_text: str) -> bool:
+    for line in log_text.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[2] == "go":
+            return True
+    return False
+
+
+def plan_check(root: Path, work_id: str) -> tuple[list[str], str]:
+    if re.fullmatch(r"[0-9]+", work_id) is None:
+        return [f"작업ID가 이슈 번호가 아니다: {work_id}"], ""
+    task = root / ".team" / "sessions" / work_id / "task.md"
+    if not task.is_file():
+        return [f"task.md가 없다: {work_id}"], ""
+    section = _plan_section(task.read_text(encoding="utf-8"))
+    errors: list[str] = []
+    found = 0
+    for raw in section.splitlines():
+        line = raw.strip()
+        if "|" not in line or not line.startswith("-"):
+            continue
+        match = _PLAN_ROW.match(line)
+        if match is None:
+            errors.append(f"계획 줄 형식이 아니다: {line}")
+            continue
+        name, dep, files, check = (part.strip() for part in match.groups())
+        found += 1
+        label = name or "(이름 없음)"
+        for field, value in (("단위", name), ("의존", dep), ("파일", files), ("검증", check)):
+            if not value:
+                errors.append(f"{label}의 {field}이 없다")
+    if found == 0:
+        errors.append("계획 단위가 없다")
+    notice = ""
+    if len(section.splitlines()) > PLAN_SCREEN:
+        notice = "계획이 한 화면을 넘었다. 계획을 줄여라.\n"
+    log_path = root / ".team" / "sessions" / work_id / "log.md"
+    log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
+    if not _has_go(log_text):
+        for path in code_dirty_paths(root):
+            errors.append(f"go 전에 코드가 바뀌었다: {path}")
+    return errors, notice
+
+
 def text_line_errors(root: Path) -> list[str]:
     errors: list[str] = []
     rule = root / RULE_REL

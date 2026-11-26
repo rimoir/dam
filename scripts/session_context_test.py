@@ -575,5 +575,67 @@ class CodeCleanTest(unittest.TestCase):
         self.assertIn("근거: 로그", text)
 
 
+class PlanCheckTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        subprocess.run(["git", "init"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=self.root, check=True)
+        (self.root / "scripts").mkdir()
+        (self.root / "scripts" / "ok.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "scripts/ok.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=self.root, check=True, capture_output=True)
+        folder = self.root / ".team" / "sessions" / "68"
+        folder.mkdir(parents=True)
+        (folder / "log.md").write_text("# 로그\n", encoding="utf-8")
+        (folder / "task.md").write_text(
+            "# 작업 68\n\n## 계획\n\n- 읽기 | 없음 | scripts/ok.py | python3 scripts/ok_test.py\n",
+            encoding="utf-8",
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _run(self) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        return subprocess.run(
+            ["python3", str(SCRIPT), "plan-check", "68"],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_complete_plan_passes(self) -> None:
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_missing_check_names_the_unit(self) -> None:
+        task = self.root / ".team" / "sessions" / "68" / "task.md"
+        task.write_text("# 작업\n\n## 계획\n\n- 읽기 | 없음 | scripts/ok.py |\n", encoding="utf-8")
+        result = self._run()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("읽기", result.stderr)
+        self.assertIn("검증", result.stderr)
+
+    def test_code_change_before_go_fails(self) -> None:
+        (self.root / "scripts" / "ok.py").write_text("x = 2\n", encoding="utf-8")
+        result = self._run()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("scripts/ok.py", result.stderr)
+
+    def test_long_plan_prints_shorten_notice(self) -> None:
+        rows = "\n".join(
+            f"- 단위{i} | 없음 | scripts/ok.py | python3 scripts/ok_test.py" for i in range(41)
+        )
+        task = self.root / ".team" / "sessions" / "68" / "task.md"
+        task.write_text(f"# 작업\n\n## 계획\n\n{rows}\n", encoding="utf-8")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("줄여라", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
