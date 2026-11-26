@@ -156,8 +156,26 @@ class StartContextTest(unittest.TestCase):
         self.assertLessEqual(len(text), INJECT_LIMIT)
         self.assertNotEqual(text, SHORTEN_LINE)
 
+    def test_injection_at_limit_is_kept(self) -> None:
+        state = "S" * 100 + "\n"
+        prefix = "- 43: 상태 시작, 담당 dev, 막힘 "
+        block_len = INJECT_LIMIT - len(prefix) - 1 - len(state)
+        self.assertGreater(block_len, 0)
+        self.assertLess(len(state), STATE_LIMIT)
+        line = prefix + ("나" * block_len)
+        write_board(self.root, [line])
+        write_note(self.root, "43", state, self.log)
+        kept = render_start_context(self.root, "work-43", switch=False)
+        self.assertEqual(len(kept), INJECT_LIMIT)
+        self.assertIn(state, kept)
+        self.assertNotEqual(kept, SHORTEN_LINE)
+        longer = prefix + ("나" * (block_len + 1))
+        write_board(self.root, [longer])
+        over = render_start_context(self.root, "work-43", switch=False)
+        self.assertEqual(over, SHORTEN_LINE)
+
     def test_injection_over_limit_is_one_shorten_line(self) -> None:
-        long_block = "나" * 3000
+        long_block = "나" * (INJECT_LIMIT + 1)
         write_board(
             self.root,
             [board_line("43", "시작", long_block)],
@@ -165,7 +183,7 @@ class StartContextTest(unittest.TestCase):
         write_note(self.root, "43", "STATE-KEEP\n", self.log)
         self.assertLess(len("STATE-KEEP\n"), STATE_LIMIT)
         text = render_start_context(self.root, "work-43", switch=True)
-        self.assertGreater(len(long_block) + len("STATE-KEEP\n"), INJECT_LIMIT)
+        self.assertGreater(len(long_block), INJECT_LIMIT)
         self.assertEqual(text, SHORTEN_LINE)
         self.assertNotIn("나", text)
         self.assertNotIn("STATE-KEEP", text)
