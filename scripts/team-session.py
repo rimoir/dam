@@ -30,6 +30,8 @@ from session_context import (  # noqa: E402
     render_start_context,
     rotate_log,
     code_dirty_paths,
+    begin_resume,
+    end_resume,
     plan_check,
     set_mode,
     text_line_errors,
@@ -290,6 +292,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("code-clean", help="코드 파일이 바뀌지 않았는지 읽기만 한다.")
     plan = sub.add_parser("plan-check", help="기능 계획의 네 칸을 읽기만 한다.")
     plan.add_argument("work_id")
+    resume = sub.add_parser("resume", help="이어받기 모드로 바꾸거나 이전 모드로 돌린다.")
+    resume.add_argument("step", choices=("begin", "end"))
     args = parser.parse_args(argv)
     root = repo_root()
     try:
@@ -319,6 +323,11 @@ def main(argv: list[str] | None = None) -> int:
             if errors:
                 print("\n".join(errors), file=sys.stderr)
                 return 1
+        elif args.command == "resume":
+            if args.step == "begin":
+                sys.stdout.write(begin_resume(root, current_branch(root)))
+            else:
+                sys.stdout.write(end_resume(root, current_branch(root)))
         elif args.command == "check":
             errors = limit_errors(root, current_branch(root))
             errors.extend(text_line_errors(root))

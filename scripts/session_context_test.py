@@ -742,10 +742,11 @@ class ResumeModeTest(unittest.TestCase):
     def test_missing_state_does_not_create_a_file(self) -> None:
         bare = Path(self.tmp.name) / "bare"
         bare.mkdir()
+        write_board(bare, [board_line("70", "시작")])
         result = self._run("begin", root=bare)
         self.assertEqual(result.returncode, 1)
         self.assertIn("상태 파일이 없다", result.stderr)
-        self.assertFalse((bare / ".team").exists())
+        self.assertFalse((bare / ".team" / "sessions" / "70").exists())
 
 
 if __name__ == "__main__":
