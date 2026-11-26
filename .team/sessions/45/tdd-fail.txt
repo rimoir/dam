@@ -1,0 +1,59 @@
+EEE
+======================================================================
+ERROR: test_failed_hook_command_exits_zero (__main__.SessionHookTest.test_failed_hook_command_exits_zero)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_hook_test.py", line 50, in test_failed_hook_command_exits_zero
+    command = command_of(load(CLAUDE))
+                         ^^^^^^^^^^^^
+  File "/agent/repos/dam/scripts/session_hook_test.py", line 20, in load
+    return json.loads(path.read_text(encoding="utf-8"))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1029, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1015, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/agent/repos/dam/.claude/settings.json'
+
+======================================================================
+ERROR: test_hook_command_still_prints_context (__main__.SessionHookTest.test_hook_command_still_prints_context)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_hook_test.py", line 77, in test_hook_command_still_prints_context
+    command = command_of(load(CODEX))
+                         ^^^^^^^^^^^
+  File "/agent/repos/dam/scripts/session_hook_test.py", line 20, in load
+    return json.loads(path.read_text(encoding="utf-8"))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1029, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1015, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/agent/repos/dam/.codex/hooks.json'
+
+======================================================================
+ERROR: test_repo_hooks_call_start_context_and_do_not_block (__main__.SessionHookTest.test_repo_hooks_call_start_context_and_do_not_block)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_hook_test.py", line 32, in test_repo_hooks_call_start_context_and_do_not_block
+    payload = load(path)
+              ^^^^^^^^^^
+  File "/agent/repos/dam/scripts/session_hook_test.py", line 20, in load
+    return json.loads(path.read_text(encoding="utf-8"))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1029, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1015, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/agent/repos/dam/.claude/settings.json'
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.001s
+
+FAILED (errors=3)

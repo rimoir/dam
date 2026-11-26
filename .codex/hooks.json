@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/team-session.py\" start-context || true",
+            "timeout": 10,
+            "statusMessage": "작업 노트 읽는 중"
+          }
+        ]
+      }
+    ]
+  }
+}
