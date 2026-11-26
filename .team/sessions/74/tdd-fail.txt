@@ -1,0 +1,4 @@
+실패 검사 커밋 65c78132140c26fd0e31254891748d1c98d4923b
+python3 scripts/orchestrator_test.py
+Ran 17 tests FAILED (failures=1, errors=3)
+prepare_unit 없음, prepare 는 invalid choice

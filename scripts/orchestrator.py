@@ -10,7 +10,9 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
+import time
 from pathlib import Path, PurePosixPath
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -285,6 +287,83 @@ def collect(root: Path, handle: str) -> dict[str, str]:
     return poll(root, handle)
 
 
+def _git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def prepare_unit(repo: Path, work_id: str, session: str = "cursor") -> dict[str, str]:
+    if re.fullmatch(r"[0-9]+", work_id) is None:
+        return blank(ok="아니오", state="거부", reason=f"작업ID가 이슈 번호가 아니다: {work_id}")
+    destination = repo.resolve().parent / f"dam-{work_id}"
+    if destination.exists():
+        return blank(ok="아니오", state="거부", reason="작업 폴더가 이미 있다")
+    branch = f"worker/{work_id}"
+    if _git(repo, ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"]).returncode == 0:
+        return blank(ok="아니오", state="거부", reason="브랜치가 이미 있다")
+    env = os.environ.copy()
+    env["TEAM_ROOT"] = str(repo)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    created = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).with_name("team-session.py")),
+            "new",
+            work_id,
+            "--session",
+            session,
+        ],
+        cwd=repo,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if created.returncode != 0:
+        return blank(ok="아니오", state="거부", reason="노트를 만들지 못했다")
+    started = time.perf_counter()
+    added = _git(repo, ["worktree", "add", "-b", branch, str(destination), "HEAD"])
+    elapsed = time.perf_counter() - started
+    if added.returncode != 0:
+        return blank(ok="아니오", state="거부", reason="작업 폴더를 만들지 못했다")
+    state = repo / ".team" / "sessions" / work_id / "state.md"
+    text = state.read_text(encoding="utf-8") if state.is_file() else ""
+    if text and not text.endswith("\n"):
+        text += "\n"
+    text += f"작업 폴더 생성: {elapsed:.3f}초\n"
+    state.write_text(text, encoding="utf-8")
+    return blank(ok="예", handle=branch, state="준비", line=str(destination))
+
+
+def worker_brief(repo: Path, work_id: str) -> str:
+    folder = repo / ".team" / "sessions" / work_id
+    chunks: list[str] = []
+    for name in ("task.md", "state.md"):
+        path = folder / name
+        if not path.is_file():
+            raise OrchestratorError(f"{name}가 없다")
+        chunks.append(name + "\n" + path.read_text(encoding="utf-8"))
+    return "\n".join(chunks)
+
+
+def guarded_write(worktree: Path, relative: str, data: str) -> dict[str, str]:
+    root = worktree.resolve()
+    target = (root / relative).resolve()
+    if not root.is_dir():
+        return blank(ok="아니오", state="거부", reason="작업 폴더가 없다")
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return blank(ok="아니오", state="거부", reason="다른 작업 폴더다")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(data, encoding="utf-8")
+    return blank(ok="예", state="썼다")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="워커 시작과 수거 어댑터.")
     parser.add_argument("--root", default="")
@@ -299,6 +378,11 @@ def main(argv: list[str] | None = None) -> int:
     admit_cmd.add_argument("--running", type=int, default=0)
     admit_cmd.add_argument("--unit", action="append", default=[])
     admit_cmd.add_argument("--finished", action="append", default=[])
+    prepare_cmd = sub.add_parser("prepare", help="노트, 브랜치, 작업 폴더를 만든다.")
+    prepare_cmd.add_argument("--work", required=True)
+    prepare_cmd.add_argument("--session", default="cursor")
+    brief_cmd = sub.add_parser("brief", help="task.md와 상태 파일만 낸다.")
+    brief_cmd.add_argument("--work", required=True)
     poll_cmd = sub.add_parser("poll", help="핸들의 상태를 읽는다.")
     poll_cmd.add_argument("--handle", required=True)
     collect_cmd = sub.add_parser("collect", help="결과 한 줄을 읽는다.")
@@ -337,6 +421,12 @@ def main(argv: list[str] | None = None) -> int:
                 selected=args.unit or None,
                 finished=args.finished or None,
             )
+        elif args.command == "prepare":
+            record = prepare_unit(root, args.work, args.session)
+        elif args.command == "brief":
+            text = worker_brief(root, args.work)
+            sys.stdout.write(text if text.endswith("\n") else text + "\n")
+            return 0
         elif args.command == "poll":
             record = poll(root, args.handle)
         else:
