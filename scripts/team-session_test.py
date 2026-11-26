@@ -39,7 +39,7 @@ class NewSessionTest(unittest.TestCase):
             text = (folder / name).read_text(encoding="utf-8")
             self.assertIn("12", text)
         task = (folder / "task.md").read_text(encoding="utf-8")
-        self.assertIn("없는표식", task)
+        self.assertIn("목표", task)
         self.assertIn("완료 기준", task)
         self.assertIn("계획", task)
         state = (folder / "state.md").read_text(encoding="utf-8")
