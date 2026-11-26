@@ -9,3 +9,4 @@
 
 2026-11-26T00:49:24Z Cursor 시작 이슈 30 어댑터 구현
 2026-11-26T00:49:24Z Cursor go 이슈를 읽어 작업 노트를 만드는 구현
+2026-11-26T00:51:03Z Cursor push 브랜치 cursor/issue-tracker-start-9729

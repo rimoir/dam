@@ -19,3 +19,8 @@ gitleaks detect --source . -v
 35 commits scanned
 no leaks found
 history_exit: 0
+
+gitleaks detect --source . --log-opts="origin/main..HEAD" -v
+2 commits scanned at a9140bf
+no leaks found
+range_exit: 0
