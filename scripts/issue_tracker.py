@@ -28,6 +28,13 @@ class IssueRecord:
 
 
 @dataclass(frozen=True)
+class WorkView:
+    issue_closed: bool
+    pull_state: str
+    checks: str
+
+
+@dataclass(frozen=True)
 class GhResult:
     code: int
     stdout: str
@@ -44,6 +51,7 @@ _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 _ITEM = re.compile(r"^\s*[-*]\s+(?:\[[ xX]\]\s+)?(.+?)\s*$")
 _COVERS = re.compile(r"^\s*(?:[-*]\s+)?Covers:\s*(.+?)\s*$")
 _ISSUE_URL = re.compile(r"^https://github\.com/[^/\s]+/[^/\s]+/issues/[0-9]+$")
+_PR_URL = re.compile(r"^https://github\.com/[^/\s]+/[^/\s]+/pull/[0-9]+$")
 _SLUGS = (
     re.compile(r"^https://github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?/?$"),
     re.compile(r"^git@github\.com:([^/\s]+)/([^/\s]+?)(?:\.git)?$"),
@@ -223,20 +231,175 @@ class GithubIssueTracker:
             commanded,
         )
 
-    def open_pull_request(self, title: str, body: str, *, commanded: bool) -> None:
-        self._write(
+    def issue_link(self, number: int) -> str:
+        return f"https://github.com/{self.slug}/issues/{number}"
+
+    def read_status(self, number: int) -> WorkView:
+        issue = self._read_json(
+            [
+                "gh",
+                "issue",
+                "view",
+                str(number),
+                "--repo",
+                self.slug,
+                "--json",
+                "state,closedByPullRequestsReferences",
+            ],
+            "이슈 상태가 아니다",
+        )
+        if not isinstance(issue, dict) or issue.get("state") not in ("OPEN", "CLOSED"):
+            raise IssueTrackerError("이슈를 읽지 못했다: 이슈 상태가 아니다")
+        prs = self._read_json(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                self.slug,
+                "--state",
+                "all",
+                "--limit",
+                "50",
+                "--search",
+                str(number),
+                "--json",
+                "number,state,body,closingIssuesReferences",
+            ],
+            "PR 목록이 아니다",
+        )
+        if not isinstance(prs, list):
+            raise IssueTrackerError("이슈를 읽지 못했다: PR 목록이 아니다")
+        closed_by = issue.get("closedByPullRequestsReferences") or []
+        chosen = _matching_pr(prs, number, closed_by if isinstance(closed_by, list) else [])
+        closed = issue["state"] == "CLOSED"
+        if chosen is None:
+            return WorkView(issue_closed=closed, pull_state="none", checks="none")
+        state = chosen.get("state")
+        if state == "OPEN":
+            return WorkView(
+                issue_closed=closed,
+                pull_state="open",
+                checks=self._check_word(int(chosen["number"])),
+            )
+        if state == "MERGED":
+            return WorkView(issue_closed=closed, pull_state="merged", checks="none")
+        return WorkView(issue_closed=closed, pull_state="closed", checks="none")
+
+    def _read_json(self, args: list[str], why: str):
+        result = self.runner(args)
+        if result.code != 0 and not (result.stdout or "").strip():
+            reason = redact(result.stderr).strip() or "gh가 실패했다"
+            raise IssueTrackerError(f"이슈를 읽지 못했다: {reason}")
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError:
+            raise IssueTrackerError(f"이슈를 읽지 못했다: {why}") from None
+
+    def _check_word(self, pr_number: int) -> str:
+        result = self.runner(
+            [
+                "gh",
+                "pr",
+                "checks",
+                str(pr_number),
+                "--repo",
+                self.slug,
+                "--json",
+                "name,bucket,state",
+            ]
+        )
+        stdout = (result.stdout or "").strip()
+        stderr = result.stderr or ""
+        if not stdout and "no checks reported" in stderr.lower():
+            return "pending"
+        if result.code != 0 and not stdout:
+            reason = redact(stderr).strip() or "gh가 실패했다"
+            raise IssueTrackerError(f"이슈를 읽지 못했다: {reason}")
+        try:
+            rows = json.loads(result.stdout) if stdout else []
+        except json.JSONDecodeError:
+            raise IssueTrackerError("이슈를 읽지 못했다: 검사 결과가 아니다") from None
+        if not isinstance(rows, list) or not rows:
+            return "pending"
+        buckets = {
+            row.get("bucket")
+            for row in rows
+            if isinstance(row, dict) and row.get("bucket")
+        }
+        if "fail" in buckets or "cancel" in buckets:
+            return "fail"
+        if "pending" in buckets:
+            return "pending"
+        if "pass" in buckets:
+            return "pass"
+        return "pending"
+
+    def open_pull_request(self, title: str, body: str, *, commanded: bool) -> str:
+        result = self._write(
             ["gh", "pr", "create", "--repo", self.slug, "--title", title, "--body-file", "-"],
             commanded,
             stdin=body,
         )
+        found = ""
+        for line in redact(result.stdout).splitlines():
+            candidate = line.strip()
+            if _PR_URL.fullmatch(candidate):
+                found = candidate
+        if not found:
+            raise IssueTrackerError("PR 주소를 읽지 못했다")
+        return found
 
-    def _write(self, args: list[str], commanded: bool, stdin: str | None = None) -> None:
+    def _write(self, args: list[str], commanded: bool, stdin: str | None = None) -> GhResult:
         if not commanded:
             raise IssueTrackerError("GitHub 쓰기는 사람이 그 동작을 직접 명령했을 때만 한다")
         result = self.runner(args, stdin)
         if result.code != 0:
             reason = redact(result.stderr).strip() or "gh가 실패했다"
             raise IssueTrackerError(f"GitHub에 쓰지 못했다: {reason}")
+        return result
+
+
+def _closes_issue(body: str, number: int) -> bool:
+    return re.search(
+        rf"(?i)(?:^|\s)(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#{number}(?!\d)",
+        body,
+    ) is not None
+
+
+def _matching_pr(prs: list, number: int, closed_by: list | None = None) -> dict | None:
+    closed_ids = {
+        item.get("number")
+        for item in (closed_by or [])
+        if isinstance(item, dict)
+    }
+    matched: list[dict] = []
+    for item in prs:
+        if not isinstance(item, dict):
+            continue
+        refs = item.get("closingIssuesReferences") or []
+        linked = any(isinstance(ref, dict) and ref.get("number") == number for ref in refs)
+        body = item.get("body") or ""
+        if (
+            linked
+            or item.get("number") in closed_ids
+            or (isinstance(body, str) and _closes_issue(body, number))
+        ):
+            matched.append(item)
+    for item in closed_by or []:
+        if isinstance(item, dict) and item.get("number") not in {row.get("number") for row in matched}:
+            merged = dict(item)
+            merged.setdefault("state", "MERGED")
+            matched.append(merged)
+    rank = {"OPEN": 0, "MERGED": 1, "CLOSED": 2}
+    best: dict | None = None
+    best_rank = 9
+    for item in matched:
+        score = rank.get(str(item.get("state")), 9)
+        if score < best_rank:
+            best = item
+            best_rank = score
+    return best
 
 
 def lock_tracker(notes_root: Path) -> str:

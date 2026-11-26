@@ -55,6 +55,8 @@ def open_board_lines(root: Path) -> list[tuple[str, str]]:
             continue
         if match.group("status").strip() in CLOSED:
             continue
+        if raw.endswith(", GitHub 닫힘") or raw.endswith(", GitHub 완료"):
+            continue
         found.append((match.group("id"), raw))
     return found
 

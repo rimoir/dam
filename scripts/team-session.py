@@ -10,6 +10,7 @@ import argparse
 import fcntl
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -19,6 +20,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 from issue_tracker import (  # noqa: E402
     IssueRecord,
     IssueTrackerError,
+    WorkView,
     load_tracker,
     redact,
 )
@@ -164,6 +166,75 @@ def create_session(root: Path, work_id: str, session: str, tracker=None) -> None
         raise
 
 
+_BOARD_ISSUE = re.compile(r"^(- [0-9]+: 상태 [^,\n]+, 담당 [^,\n]+, 막힘 [^,\n]+)")
+
+
+def github_clause(view: WorkView) -> str:
+    if view.issue_closed:
+        return "GitHub 닫힘"
+    if view.pull_state == "open":
+        word = {"pass": "통과", "fail": "실패", "pending": "아직 안 돎"}.get(
+            view.checks, "아직 안 돎"
+        )
+        return f"GitHub 검토 중, 검사 {word}"
+    if view.pull_state == "merged":
+        return "GitHub 완료"
+    return "GitHub 열림"
+
+
+def _refresh_text(original: str, active) -> str:
+    pieces: list[str] = []
+    for line in original.splitlines(keepends=True):
+        match = _BOARD_ISSUE.match(line.rstrip("\n"))
+        if match is None:
+            pieces.append(line)
+            continue
+        prefix = match.group(1)
+        number = prefix.split(":", 1)[0][2:]
+        view = active.read_status(int(number))
+        ending = "\n" if line.endswith("\n") else ""
+        pieces.append(f"{prefix}, {github_clause(view)}{ending}")
+    return "".join(pieces)
+
+
+def refresh_board(root: Path, tracker=None) -> None:
+    path = root / ".team" / "board.md"
+    if not path.is_file():
+        raise SystemExit("board.md가 없다")
+    active = tracker if tracker is not None else load_tracker(root)
+    with path.open("r+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        original = handle.read()
+        updated = _refresh_text(original, active)
+        if updated == original:
+            return
+        handle.seek(0)
+        handle.write(updated)
+        handle.truncate()
+
+
+def open_work_pr(root: Path, work_id: str, title: str, tool: str, tracker=None) -> str:
+    if tool not in ("Claude Code", "Codex"):
+        raise SystemExit("도구는 Claude Code 또는 Codex다")
+    if not ISSUE_ID.fullmatch(work_id):
+        raise SystemExit("작업ID가 이슈 번호가 아니다")
+    if not title.strip():
+        raise SystemExit("제목이 없다")
+    log_path = root / ".team" / "sessions" / work_id / "log.md"
+    if not log_path.is_file():
+        raise SystemExit(f"log.md가 없다: {work_id}")
+    active = tracker if tracker is not None else load_tracker(root)
+    body = f"{active.issue_link(int(work_id))}\n"
+    url = active.open_pull_request(title.strip(), body, commanded=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    text = log_path.read_text(encoding="utf-8")
+    if text and not text.endswith("\n"):
+        text += "\n"
+    text += f"{stamp} {tool} push {url}\n"
+    log_path.write_text(text, encoding="utf-8")
+    return url
+
+
 LIMIT = 10000
 
 
@@ -196,6 +267,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="도구를 바꿀 때 로그 마지막 5줄을 더한다.",
     )
+    pull = sub.add_parser("pull", help="사람이 명령했을 때만 PR을 연다.")
+    pull.add_argument("work_id")
+    pull.add_argument("--title", required=True)
+    pull.add_argument("--tool", required=True)
+    sub.add_parser("board", help="현황판을 읽기로 갱신한다.")
     args = parser.parse_args(argv)
     root = repo_root()
     try:
@@ -205,6 +281,10 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(summary_text(root, args.work_id))
         elif args.command == "start-context":
             sys.stdout.write(render_start_context(root, current_branch(root), args.switch))
+        elif args.command == "pull":
+            sys.stdout.write(open_work_pr(root, args.work_id, args.title, args.tool) + "\n")
+        elif args.command == "board":
+            refresh_board(root)
     except IssueTrackerError as exc:
         print(redact(str(exc)), file=sys.stderr)
         return 1

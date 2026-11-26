@@ -14,6 +14,8 @@
 - 생성기가 task.md, state.md, log.md, result.md와 board.md 한 줄을 만든다. 목표, 완료 기준, 계획은 task.md에 채운다.
 - 작업ID가 이슈 번호이면 같은 생성기가 issue-tracker 어댑터로 이슈를 읽는다. 제목과 이슈 링크는 task.md 목표에, 완료 기준 목록은 완료 기준 칸에 넣는다. 날짜형 작업ID는 이슈를 읽지 않는다. 이미 있는 노트는 덮어쓰지 않는다. 이슈를 읽지 못하면 이유를 알리고 노트를 만들지 않는다.
 - GitHub 명령은 issue-tracker 어댑터 한 곳에만 둔다. 기본 선택은 github이고, 사람이 이미 로그인한 gh CLI만 쓴다. 새 토큰은 만들지 않는다. GitHub에 쓰는 동작은 사람이 그 동작을 직접 명령했을 때만 그 어댑터를 통한다.
+- PR은 자동으로 열지 않는다. 사람이 `python3 scripts/team-session.py pull <이슈번호> --title <제목> --tool Codex`를 실행했을 때만 연다. 본문에 이슈 링크가 들어가고, log.md에 PR URL이 도구 칸과 함께 한 줄로 남는다. 도구는 `Claude Code` 또는 `Codex`다.
+- 현황판 갱신은 `python3 scripts/team-session.py board`이고 읽기만 한다. 상태, 담당, 막힘 칸은 유지한다. 열린 PR은 검토 중과 검사 결과, 머지되면 완료, 이슈가 닫히면 닫힘이다. 실패하면 기존 줄을 바꾸지 않는다.
 - 계획을 task.md에 쓴 뒤 사람의 go를 기다린다. go 전에는 `git status`로 코드 파일이 바뀌지 않았는지 확인한다. 노트와 `.team/board.md`는 계획 단계에서 바뀌어도 된다.
 - go, 시작, 종료, push, 재개는 log.md에 `YYYY-MM-DDTHH:MM:SSZ 도구 종류 내용` 한 줄로 남긴다. 도구는 `Claude Code` 또는 `Codex`다. Claude Code와 Codex가 같은 형식을 쓴다.
 - 작업 단위가 끝날 때마다 state.md의 지금 상태, 결정, 다음 할 일을 갱신한다.

@@ -1,0 +1,21 @@
+가짜 gh. 네트워크로 PR을 열지 않았다.
+
+python3 scripts/team-session.py pull 31 --title 제목 --tool Codex
+exit 0
+stdout https://github.com/rimoir/dam/pull/99
+
+gh argv
+pr create --repo rimoir/dam --title 제목 --body-file -
+
+body
+https://github.com/rimoir/dam/issues/31
+
+log.md
+2026-11-26T01:37:41Z Codex push https://github.com/rimoir/dam/pull/99
+
+실패 재실행: exit 1, log.md 바이트 동일
+
+rulesync 43.14.0
+CLAUDE.md sha256 32f27782a6f2b52678064dc66e04da812448595ae0a3e13b335ffd28ba698f6a
+AGENTS.md sha256 32f27782a6f2b52678064dc66e04da812448595ae0a3e13b335ffd28ba698f6a
+다시 생성해도 같음

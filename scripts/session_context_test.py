@@ -119,6 +119,26 @@ class StartContextTest(unittest.TestCase):
         self.assertIn(board_line("43", "시작"), text)
         self.assertNotIn(self.state, text)
 
+    def test_github_suffix_keeps_open_lines_and_drops_closed(self) -> None:
+        write_board(
+            self.root,
+            [
+                "- 43: 상태 진행, 담당 dev, 막힘 없음, GitHub 검토 중, 검사 통과",
+                "- 44: 상태 시작, 담당 dev, 막힘 없음, GitHub 열림",
+                "- 30: 상태 시작, 담당 dev, 막힘 없음, GitHub 닫힘",
+                "- 12: 상태 시작, 담당 dev, 막힘 없음, GitHub 완료",
+            ],
+        )
+        text = render_start_context(self.root, "work-43", switch=False)
+        self.assertIn("GitHub 검토 중, 검사 통과", text)
+        self.assertIn("GitHub 열림", text)
+        self.assertIn(self.state, text)
+        self.assertNotIn("GitHub 닫힘", text)
+        self.assertNotIn("GitHub 완료", text)
+        closed = render_start_context(self.root, "work-30", switch=False)
+        self.assertNotIn(self.state, closed)
+        self.assertNotIn("GitHub 닫힘", closed)
+
     def test_closed_branch_issue_does_not_add_its_state(self) -> None:
         text = render_start_context(self.root, "topic-30", switch=False)
         self.assertNotIn(board_line("30", "완료"), text)
