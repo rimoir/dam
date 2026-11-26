@@ -1,0 +1,33 @@
+$ python3 scripts/orchestrator.py --root /tmp/orch-prove start --unit 72
+ok: 예
+handle: native-1
+state: 대기
+line: 
+reason: 
+$ python3 scripts/orchestrator.py --root /tmp/orch-prove poll --handle native-1
+ok: 예
+handle: native-1
+state: 대기
+line: 
+reason: 
+$ python3 scripts/orchestrator.py --root /tmp/orch-prove collect --handle native-1
+ok: 예
+handle: native-1
+state: 대기
+line: 
+reason: 
+$ python3 scripts/orchestrator.py --root /tmp/orch-fake start --unit 72
+ok: 예
+handle: fake-1
+state: 대기
+line: 
+reason: 
+$ python3 scripts/orchestrator.py --root /tmp/orch-orca start --unit 72
+ok: 아니오
+handle: 
+state: 거부
+line: 
+reason: orchestrator 선택을 모른다: orca
+exit:1
+orca files:
+/tmp/orch-orca/.team/adapters.lock

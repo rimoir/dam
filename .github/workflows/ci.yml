@@ -22,6 +22,7 @@ jobs:
           python3 scripts/team-session_test.py
           python3 scripts/session_context_test.py
           python3 scripts/session_hook_test.py
+          python3 scripts/orchestrator_test.py
           python3 scripts/team-session.py check
 
   rulesync-regen:

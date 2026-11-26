@@ -1,0 +1,4 @@
+실패 검사 커밋 47f9c298eb83483f1e518774d22bb16997040a6d
+python3 scripts/orchestrator_test.py
+Ran 7 tests FAILED (failures=2, errors=4)
+can't open file scripts/orchestrator.py
