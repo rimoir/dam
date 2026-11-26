@@ -12,6 +12,17 @@ import re
 import sys
 from pathlib import Path
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
+from issue_tracker import (  # noqa: E402
+    IssueRecord,
+    IssueTrackerError,
+    load_tracker,
+    redact,
+)
+
 ISSUE_ID = re.compile(r"^[0-9]+$")
 DATE_ID = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(?:-[a-z0-9]+)*$")
 SESSION_NAME = re.compile(r"^[A-Za-z0-9._\-\uac00-\ud7a3]{1,40}$")
@@ -30,17 +41,30 @@ def valid_work_id(work_id: str) -> bool:
     return bool(ISSUE_ID.fullmatch(work_id) or DATE_ID.fullmatch(work_id))
 
 
+def render_task(work_id: str, issue: IssueRecord | None) -> str:
+    if issue is None:
+        goal = "(한 줄)"
+        criteria = "- (관찰 가능한 조건)\n"
+    else:
+        goal = f"{issue.title}\n\n{issue.url}"
+        if issue.acceptance:
+            criteria = "".join(f"- {item}\n" for item in issue.acceptance)
+        else:
+            criteria = "- (없음)\n"
+    return (
+        f"# 작업 {work_id}\n\n"
+        "## 목표\n\n"
+        f"{goal}\n\n"
+        "## 완료 기준\n\n"
+        f"{criteria}\n"
+        "## 계획\n\n"
+        "- (단계)\n"
+    )
+
+
 def templates(work_id: str) -> dict[str, str]:
     return {
-        "task.md": (
-            f"# 작업 {work_id}\n\n"
-            "## 목표\n\n"
-            "(한 줄)\n\n"
-            "## 완료 기준\n\n"
-            "- (관찰 가능한 조건)\n\n"
-            "## 계획\n\n"
-            "- (단계)\n"
-        ),
+        "task.md": render_task(work_id, None),
         "state.md": (
             f"# 상태 {work_id}\n\n"
             "## 지금 상태\n\n"
@@ -94,19 +118,44 @@ def ensure_board(root: Path, work_id: str, session: str) -> None:
         handle.flush()
 
 
-def create_session(root: Path, work_id: str, session: str) -> None:
+def _drop_created(folder: Path, created_folder: bool, created_files: list[Path]) -> None:
+    for path in created_files:
+        path.unlink(missing_ok=True)
+    if created_folder:
+        try:
+            folder.rmdir()
+        except OSError:
+            return
+
+
+def create_session(root: Path, work_id: str, session: str, tracker=None) -> None:
     if not valid_work_id(work_id):
         raise SystemExit(f"작업ID 형식이 아니다: {work_id}")
     if not SESSION_NAME.fullmatch(session):
         raise SystemExit(f"담당 세션 형식이 아니다: {session}")
     folder = root / ".team" / "sessions" / work_id
-    folder.mkdir(parents=True, exist_ok=True)
-    for name, body in templates(work_id).items():
-        path = folder / name
-        if path.exists():
-            continue
-        path.write_text(body, encoding="utf-8")
-    ensure_board(root, work_id, session)
+    task_path = folder / "task.md"
+    bodies = templates(work_id)
+    if ISSUE_ID.fullmatch(work_id) and not task_path.exists():
+        active = tracker if tracker is not None else load_tracker(root)
+        issue = active.read_issue(int(work_id))
+        bodies["task.md"] = render_task(work_id, issue)
+    created_folder = False
+    created_files: list[Path] = []
+    try:
+        if not folder.exists():
+            folder.mkdir(parents=True)
+            created_folder = True
+        for name, body in bodies.items():
+            path = folder / name
+            if path.exists():
+                continue
+            path.write_text(body, encoding="utf-8")
+            created_files.append(path)
+        ensure_board(root, work_id, session)
+    except Exception:
+        _drop_created(folder, created_folder, created_files)
+        raise
 
 
 LIMIT = 10000
@@ -134,10 +183,14 @@ def main(argv: list[str] | None = None) -> int:
     summary.add_argument("work_id")
     args = parser.parse_args(argv)
     root = repo_root()
-    if args.command == "new":
-        create_session(root, args.work_id, args.session)
-    elif args.command == "summary":
-        sys.stdout.write(summary_text(root, args.work_id))
+    try:
+        if args.command == "new":
+            create_session(root, args.work_id, args.session)
+        elif args.command == "summary":
+            sys.stdout.write(summary_text(root, args.work_id))
+    except IssueTrackerError as exc:
+        print(redact(str(exc)), file=sys.stderr)
+        return 1
     return 0
 
 

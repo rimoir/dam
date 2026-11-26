@@ -68,6 +68,12 @@ codex
 
 저장소 루트에서 위 명령으로 연다. 열린 작업은 `.team/board.md`와 그 작업의 `state.md`를 읽고, log.md 한 줄의 도구 칸에는 `Codex`를 적는다. 새 작업은 `python3 scripts/team-session.py new <작업ID>`다.
 
+## 이슈로 작업 시작
+
+작업ID가 이슈 번호이면 `python3 scripts/team-session.py new <번호>`가 issue-tracker 어댑터로 그 이슈를 읽는다. 기본 선택은 github이고, 사람이 이미 로그인한 `gh`만 쓴다. 제목과 이슈 링크는 task.md 목표에, 완료 기준 목록은 완료 기준 칸에 들어간다. 날짜형 작업ID는 이슈를 읽지 않는다. 이미 있는 노트는 덮어쓰지 않는다. 이슈를 읽지 못하면 이유를 알리고 노트를 만들지 않는다.
+
+선택 파일은 `.team/adapters.lock`의 `issue-tracker` 키다. 파일이 없으면 github다. 토큰은 적지 않는다. 결정은 `docs/adr/0004-m3-scope.md`, `docs/adr/0005-adapter-choice.md`다.
+
 ## 검사
 
 main으로 가는 pull request와 main push에서 같은 검사 세 개가 돈다. 로컬에서도 같은 명령을 쓴다. Node.js는 `22.22.0` 이상이다.

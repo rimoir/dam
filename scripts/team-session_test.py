@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -94,7 +95,16 @@ def run(
         python_bin = shutil.which("python3")
         if not python_bin:
             raise RuntimeError("python3가 없다")
-        env["PATH"] = str(Path(python_bin).parent)
+        bindir = root / "barebin"
+        bindir.mkdir(parents=True, exist_ok=True)
+        git_bin = shutil.which("git")
+        if not git_bin:
+            raise RuntimeError("git가 없다")
+        for name, target in (("python3", python_bin), ("git", git_bin)):
+            link = bindir / name
+            if not link.exists():
+                link.symlink_to(target)
+        env["PATH"] = str(bindir)
     return subprocess.run(
         ["python3", str(SCRIPT), *args],
         cwd=root,
@@ -109,6 +119,7 @@ def load_module(path: Path, name: str):
     if spec is None or spec.loader is None:
         raise RuntimeError(f"모듈을 열지 못했다: {path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -465,6 +476,24 @@ class IssueStartTest(unittest.TestCase):
             with self.assertRaises(tracker_mod.IssueTrackerError):
                 call()
         self.assertEqual(called, [])
+
+    def test_commanded_write_is_gh_and_nothing_else(self) -> None:
+        tracker_mod = load_module(TRACKER, "issue_tracker_commanded")
+        seen: list[tuple[list[str], str | None]] = []
+
+        def runner(args: list[str], stdin: str | None = None):
+            seen.append((args, stdin))
+            return tracker_mod.GhResult(0, "", "")
+
+        tracker = tracker_mod.GithubIssueTracker("rimoir/dam", runner)
+        tracker.comment(30, "본문", commanded=True)
+        self.assertEqual(len(seen), 1)
+        args, stdin = seen[0]
+        self.assertEqual(args[0], "gh")
+        self.assertEqual(args[1:3], ["issue", "comment"])
+        self.assertEqual(stdin, "본문")
+        self.assertNotIn("dooray", " ".join(args))
+        self.assertTrue(all(item != "curl" for item in args))
 
     def test_slug_drops_credentials(self) -> None:
         tracker_mod = load_module(TRACKER, "issue_tracker_slug")

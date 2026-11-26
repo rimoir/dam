@@ -1,0 +1,21 @@
+slug rimoir/dam
+
+TEAM_ROOT=<임시> python3 scripts/team-session.py new 30 --session cursor
+read_exit 0
+read_stderr (비어 있음)
+
+task.md 목표: [M3b] issue-tracker 어댑터와 이슈로 작업 시작을 넣는다
+task.md 링크: https://github.com/rimoir/dam/issues/30
+완료 기준: Covers 네 줄. 노트 비밀 검사 clean.
+
+같은 노트에 손글씨를 붙인 뒤 new 30
+rerun_exit 0
+rerun_same True
+
+TEAM_ROOT=<다른 임시> python3 scripts/team-session.py new 999999999
+missing_exit 1
+missing_stderr 이슈를 읽지 못했다: GraphQL: Could not resolve to an issue or pull request with the number of 999999999. (repository.issue)
+missing_session False
+missing_board False
+
+이 읽기는 VM의 gh 로그인으로 했다. 사람 계정 로그인 확인은 HR P 게이트로 남긴다.
