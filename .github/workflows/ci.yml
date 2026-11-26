@@ -75,6 +75,12 @@ jobs:
           set -euo pipefail
           if [ "$EVENT_NAME" = "pull_request" ]; then
             range="${BASE_SHA}..HEAD"
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then
+              range="HEAD"
+            else
+              range="origin/main..HEAD"
+            fi
           elif [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
             range="-1"
           else

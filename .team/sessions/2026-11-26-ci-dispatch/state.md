@@ -4,13 +4,13 @@
 
 ## 지금 상태
 
-ci.yml에 workflow_dispatch만 더했다. pull_request, push, job 본문은 그대로다. PR https://github.com/rimoir/dam/pull/112 head `69bc47a`에서 python test, rulesync regen, gitleaks가 통과했다. workflow_dispatch API는 403이다.
+수동 실행의 gitleaks 추가 커밋 범위는 HEAD가 origin/main과 같으면 HEAD, 아니면 origin/main..HEAD다. pull_request와 push 분기는 그대로다. 로그 도구 칸은 Codex다.
 
 ## 결정
 
-- 트리거만 더한다. job 본문은 고치지 않는다. 수동 실행의 추가 커밋 검사는 범위 `..HEAD`로 커밋 0개이고 종료 코드 0이다. 작업 트리 검사는 그대로 돈다.
-- README 검사 절에 재실행 명령 한 줄을 적는다.
+- workflow_dispatch만 범위를 바꾼다. checkout fetch-depth 0이 origin/main을 가져온다.
+- 로그 도구는 세션 72부터 76까지가 쓴 Codex를 따른다. 세션 30부터 70은 Cursor다.
 
 ## 다음 할 일
 
-열린 PR에서 멈춘다. 머지하지 않는다.
+이 커밋의 검사 세 개를 확인하고 열린 PR에서 멈춘다. 머지하지 않는다.

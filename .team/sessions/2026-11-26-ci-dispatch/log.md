@@ -7,6 +7,8 @@
 
 예: `2026-11-26T00:00:00Z Codex go 계획 승인`
 
-2026-11-26T10:36:26Z Cursor 시작 CI를 손으로 다시 돌리게 한다
-2026-11-26T10:36:26Z Cursor go workflow_dispatch와 README 한 줄
-2026-11-26T10:38:12Z Cursor push https://github.com/rimoir/dam/pull/112
+2026-11-26T10:36:26Z Codex 시작 CI를 손으로 다시 돌리게 한다
+2026-11-26T10:36:26Z Codex go workflow_dispatch와 README 한 줄
+2026-11-26T10:38:12Z Codex push https://github.com/rimoir/dam/pull/112
+2026-11-26T10:46:40Z Codex go 수동 실행의 추가 커밋 범위를 main 기준으로 본다
+2026-11-26T10:46:43Z Codex push https://github.com/rimoir/dam/pull/112
