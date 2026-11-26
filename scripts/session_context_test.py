@@ -455,5 +455,40 @@ class ModeCommandTest(unittest.TestCase):
         self.assertIn("python3 scripts/team-session.py mode".encode(), claude)
 
 
+class LineLimitTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_check_fails_when_rule_or_command_is_too_long(self) -> None:
+        from session_context import text_line_errors
+
+        rule = self.root / ".rulesync" / "rules"
+        rule.mkdir(parents=True)
+        (rule / "dam.md").write_text("줄\n" * 51, encoding="utf-8")
+        command = self.root / ".claude" / "commands"
+        command.mkdir(parents=True)
+        (command / "mode.md").write_text("줄\n" * 41, encoding="utf-8")
+        skill = self.root / ".agents" / "skills" / "mode"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("다른\n", encoding="utf-8")
+        errors = "\n".join(text_line_errors(self.root))
+        self.assertIn("51", errors)
+        self.assertIn("41", errors)
+        self.assertIn("다르다", errors)
+        proc = subprocess.run(
+            ["python3", str(SCRIPT), "check"],
+            cwd=self.root,
+            env={**os.environ, "TEAM_ROOT": str(self.root)},
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertIn("51", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

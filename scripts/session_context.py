@@ -11,6 +11,13 @@ from pathlib import Path
 INJECT_LIMIT = 4000
 STATE_LIMIT = 2000
 LOG_LINE_LIMIT = 200
+RULE_LINE_LIMIT = 50
+COMMAND_LINE_LIMIT = 40
+RULE_REL = Path(".rulesync/rules/dam.md")
+COMMAND_RELS = (
+    Path(".claude/commands/mode.md"),
+    Path(".agents/skills/mode/SKILL.md"),
+)
 SHORTEN_LINE = "상한을 넘었다. 상태 파일 또는 시작 주입을 줄여라.\n"
 WORK_ID = re.compile(
     r"^(?:[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(?:-[a-z0-9]+)*)$"
@@ -152,6 +159,28 @@ def set_mode(root: Path, branch: str, name: str) -> str:
         lines.insert(0, replacement)
     state.write_text("".join(lines), encoding="utf-8")
     return replacement
+
+
+def text_line_errors(root: Path) -> list[str]:
+    errors: list[str] = []
+    rule = root / RULE_REL
+    if rule.is_file():
+        count = len(rule.read_text(encoding="utf-8").splitlines())
+        if count > RULE_LINE_LIMIT:
+            errors.append(f"규칙 원본이 {RULE_LINE_LIMIT}줄을 넘는다: {count}")
+    bodies: list[str] = []
+    for rel in COMMAND_RELS:
+        path = root / rel
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        bodies.append(text)
+        count = len(text.splitlines())
+        if count > COMMAND_LINE_LIMIT:
+            errors.append(f"모드 명령 본문이 {COMMAND_LINE_LIMIT}줄을 넘는다: {rel.as_posix()} ({count})")
+    if len(bodies) == 2 and bodies[0] != bodies[1]:
+        errors.append("두 도구의 모드 명령 본문이 다르다")
+    return errors
 
 
 def limit_errors(root: Path, branch: str) -> list[str]:
