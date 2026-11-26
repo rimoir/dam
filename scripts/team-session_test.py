@@ -1090,5 +1090,29 @@ class WorkerWriteDecisionTest(unittest.TestCase):
         )
 
 
+class ModeDeclarationTest(unittest.TestCase):
+    MODE_LINE = "모드 이름: 조사, 작은 수정, 기능, 이어받기"
+
+    def test_rule_declares_four_modes_and_one_question(self) -> None:
+        rule = (ROOT / ".rulesync/rules/dam.md").read_text(encoding="utf-8")
+        self.assertEqual(rule.count(self.MODE_LINE), 1)
+        self.assertIn("모드와 이유 한 줄", rule)
+        self.assertIn("세션당 질문은 한 번", rule)
+        self.assertIn("코드를 덜 바꾸는 쪽", rule)
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            generated = (ROOT / name).read_text(encoding="utf-8")
+            self.assertEqual(generated.count(self.MODE_LINE), 1)
+        adr = (ROOT / "docs/adr/0008-mode-declaration.md").read_text(encoding="utf-8")
+        for mode in ("조사", "작은 수정", "기능", "이어받기"):
+            self.assertIn(mode, adr)
+        self.assertIn("모드: ", adr)
+        self.assertIn("추정", adr)
+        examples = [line for line in adr.splitlines() if line.startswith("예시:")]
+        self.assertEqual(len(examples), 4)
+        for line in examples:
+            self.assertIn("기본값", line)
+            self.assertIn("질문 한 번", line)
+
+
 if __name__ == "__main__":
     unittest.main()
