@@ -9,3 +9,4 @@
 2026-11-26T02:31:34Z Cursor 시작 이슈 45 SessionStart 훅
 2026-11-26T02:31:34Z Cursor go 저장소 안 훅만 두고 실패해도 세션을 막지 않는다
 2026-11-26T02:31:50Z Cursor push 브랜치 cursor/session-start-hooks-45-ed7f
+2026-11-26T02:34:57Z Cursor go Codex 신뢰 절차를 공식 문서 문장으로 고친다
