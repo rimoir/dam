@@ -24,7 +24,12 @@ from issue_tracker import (  # noqa: E402
     load_tracker,
     redact,
 )
-from session_context import current_branch, render_start_context  # noqa: E402
+from session_context import (  # noqa: E402
+    current_branch,
+    limit_errors,
+    render_start_context,
+    rotate_log,
+)
 
 ISSUE_ID = re.compile(r"^[0-9]+$")
 DATE_ID = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -272,6 +277,9 @@ def main(argv: list[str] | None = None) -> int:
     pull.add_argument("--title", required=True)
     pull.add_argument("--tool", required=True)
     sub.add_parser("board", help="현황판을 읽기로 갱신한다.")
+    rotate = sub.add_parser("rotate", help="로그가 상한을 넘으면 앞부분을 log/로 옮긴다.")
+    rotate.add_argument("work_id")
+    sub.add_parser("check", help="상태 파일과 로그와 시작 주입 상한을 검사한다.")
     args = parser.parse_args(argv)
     root = repo_root()
     try:
@@ -285,6 +293,13 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(open_work_pr(root, args.work_id, args.title, args.tool) + "\n")
         elif args.command == "board":
             refresh_board(root)
+        elif args.command == "rotate":
+            rotate_log(root, args.work_id)
+        elif args.command == "check":
+            errors = limit_errors(root, current_branch(root))
+            if errors:
+                print("\n".join(errors), file=sys.stderr)
+                return 1
     except IssueTrackerError as exc:
         print(redact(str(exc)), file=sys.stderr)
         return 1

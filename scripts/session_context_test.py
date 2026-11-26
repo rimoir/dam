@@ -308,9 +308,8 @@ class LogLimitTest(unittest.TestCase):
         (folder / "state.md").write_text("가" * (STATE_LIMIT + 1), encoding="utf-8")
         (folder / "log.md").write_text("줄\n" * (LOG_LINE_LIMIT + 1), encoding="utf-8")
         errors = "\n".join(limit_errors(self.root, "work-44"))
-        self.assertIn("44", errors)
-        self.assertIn(str(STATE_LIMIT), errors)
-        self.assertIn(str(LOG_LINE_LIMIT), errors)
+        self.assertIn("상태 파일이 2000자를 넘는다: 44", errors)
+        self.assertIn("로그가 200줄을 넘는다: 44", errors)
 
     def test_check_ignores_notes_folder_and_passes_small_files(self) -> None:
         notes = self.root / ".team" / "sessions" / "12"
