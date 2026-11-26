@@ -7,3 +7,4 @@
 
 2026-11-26T05:46:12Z Cursor 시작 이슈 60 문서 작업
 2026-11-26T05:50:40Z Cursor go 실패 검사 뒤 ADR 0007과 충돌 줄 대체
+2026-11-26T05:51:38Z Cursor push https://github.com/rimoir/dam/pull/89
