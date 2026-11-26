@@ -16,6 +16,7 @@ WORK_ID = re.compile(
     r"^(?:[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(?:-[a-z0-9]+)*)$"
 )
 CLOSED = frozenset({"완료", "닫힘"})
+MODES = ("조사", "작은 수정", "기능", "이어받기")
 BOARD_LINE = re.compile(
     r"^- (?P<id>\S+): 상태 (?P<status>[^,]+), 담당 [^,]+, 막힘 .*$"
 )
@@ -130,6 +131,27 @@ def rotate_log(root: Path, work_id: str) -> Path | None:
     archive.write_bytes(moved)
     path.write_text(f"이전: log/{number:03d}.md\n{kept}", encoding="utf-8")
     return archive
+
+
+def set_mode(root: Path, branch: str, name: str) -> str:
+    if name not in MODES:
+        raise SystemExit(f"모드 이름이 아니다: {name}")
+    issue_id = issue_id_from_branch(branch)
+    open_ids = {work_id for work_id, _line in open_board_lines(root)}
+    if issue_id is None or issue_id not in open_ids:
+        return "열린 작업이 없다\n"
+    state = root / ".team" / "sessions" / issue_id / "state.md"
+    if not state.is_file():
+        return "상태 파일이 없다\n"
+    original = state.read_text(encoding="utf-8")
+    lines = original.splitlines(keepends=True)
+    replacement = f"모드: {name}\n"
+    if lines and lines[0].startswith("모드:"):
+        lines[0] = replacement
+    else:
+        lines.insert(0, replacement)
+    state.write_text("".join(lines), encoding="utf-8")
+    return replacement
 
 
 def limit_errors(root: Path, branch: str) -> list[str]:

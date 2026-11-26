@@ -14,7 +14,7 @@
 
 ## 모드
 
-모드는 조사, 작은 수정, 기능, 이어받기 넷이다. 첫 답은 모드와 이유 한 줄, 작업 이름, 다음 할 일 세 줄이다. 두 모드에 걸치면 세션당 질문은 한 번이고, 기본값은 코드를 덜 바꾸는 쪽이다. 기준과 예시 네 개, 상태 파일 첫 줄 형식은 `docs/adr/0008-mode-declaration.md`다.
+모드는 조사, 작은 수정, 기능, 이어받기 넷이다. 첫 답은 모드와 이유 한 줄, 작업 이름, 다음 할 일 세 줄이다. 두 모드에 걸치면 세션당 질문은 한 번이고, 기본값은 코드를 덜 바꾸는 쪽이다. 기준과 예시 네 개, 상태 파일 첫 줄 형식은 `docs/adr/0008-mode-declaration.md`다. 모드 바꾸기는 `python3 scripts/team-session.py mode <이름>`이고, Claude `.claude/commands/mode.md`와 Codex `.agents/skills/mode/SKILL.md`의 본문은 같다.
 
 ## 세션 시작
 
