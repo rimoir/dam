@@ -397,7 +397,11 @@ def record_parallel(root: Path, work_id: str) -> dict[str, str]:
             found = True
             match = _BOARD_PREFIX.match(raw)
             base = match.group(1) if match else raw.split(", 마지막 로그", 1)[0].split(", GitHub", 1)[0]
-            lines.append(f"{base}, 마지막 로그 {stamp}")
+            github = ""
+            github_at = raw.find(", GitHub ")
+            if github_at != -1:
+                github = raw[github_at:]
+            lines.append(f"{base}, 마지막 로그 {stamp}{github}")
         else:
             lines.append(raw)
     if not found:
