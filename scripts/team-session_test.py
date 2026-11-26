@@ -852,6 +852,24 @@ class BoardRefreshTest(unittest.TestCase):
         self.assertIn("막힘 스펙, GitHub 검토 중, 검사 아직 안 돎", text)
         self.assertIn("- 13: 상태 시작, 담당 dev, 막힘 없음, GitHub 완료\n", text)
 
+    def test_refresh_keeps_the_last_log_field(self) -> None:
+        session = load_module(SCRIPT, "team_session_last_log")
+        view = session.WorkView(issue_closed=False, pull_state="open", checks="pass")
+
+        class Fake:
+            def read_status(self, number: int):
+                return view
+
+        self.board.write_text(
+            "- 31: 상태 진행, 담당 worker, 막힘 없음, 마지막 로그 2026-11-26T01:02:03Z\n",
+            encoding="utf-8",
+        )
+        session.refresh_board(self.root, Fake())
+        text = self.board.read_text(encoding="utf-8")
+        self.assertIn("마지막 로그 2026-11-26T01:02:03Z", text)
+        self.assertIn("GitHub 검토 중, 검사 통과", text)
+        self.assertTrue(text.strip().endswith("검사 통과"))
+
     def test_fake_tracker_matches_board_text(self) -> None:
         session = load_module(SCRIPT, "team_session_board")
         view = session.WorkView(issue_closed=False, pull_state="open", checks="pass")
