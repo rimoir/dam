@@ -523,5 +523,91 @@ class PrepareTest(unittest.TestCase):
         self.assertNotIn("LOG-SECRET", brief.stdout)
 
 
+class JudgeTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        install_marker(self.root, "claude")
+        install_marker(self.root, "codex")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_four_outcomes(self) -> None:
+        module = load_module(SCRIPT, "orchestrator_judge")
+        self.assertEqual(module.judge(0, "PASS 끝", True), "성공")
+        self.assertEqual(module.judge(0, "ISSUES 남음", True), "문제")
+        self.assertEqual(module.judge(0, "BLOCKED 막힘", False), "문제")
+        self.assertEqual(module.judge(2, "PASS 끝", True), "실패")
+        self.assertEqual(module.judge(0, "", True), "미완")
+        self.assertEqual(module.judge(0, "(아직 없음)", True), "미완")
+        self.assertEqual(module.judge(0, "PASS 끝", False), "미완")
+        self.assertEqual(module.judge(0, "PASS 끝", True, turn_failed=True), "실패")
+
+    def test_collect_reads_only_the_result_line(self) -> None:
+        folder = self.root / ".team" / "sessions" / "75"
+        folder.mkdir(parents=True)
+        (folder / "result.md").write_text(
+            "# 결과 75\n\n## 결과\n\nPASS 한줄\n\n## 교훈 후보\n\n- EXTRA-BODY\n",
+            encoding="utf-8",
+        )
+        (folder / "state.md").write_text(
+            "# 상태\n\n## 다음 할 일\n\n남은 일을 적었다\n",
+            encoding="utf-8",
+        )
+        module = load_module(SCRIPT, "orchestrator_collect")
+        record = module.collect_work(self.root, "75")
+        self.assertEqual(record["line"], "PASS 한줄")
+        self.assertEqual(record["state"], "성공")
+        self.assertNotIn("EXTRA-BODY", record["line"])
+        self.assertNotIn("교훈", record["line"])
+
+    def test_secret_does_not_remain_in_output(self) -> None:
+        token = "ghp_" + ("A" * 36)
+        folder = self.root / ".team" / "sessions" / "75"
+        folder.mkdir(parents=True)
+        (folder / "result.md").write_text(
+            f"# 결과\n\n## 결과\n\nPASS {token}\n\n## 교훈 후보\n\n- {token}\n",
+            encoding="utf-8",
+        )
+        (folder / "state.md").write_text(
+            "# 상태\n\n## 다음 할 일\n\n고쳤다\n",
+            encoding="utf-8",
+        )
+        module = load_module(SCRIPT, "orchestrator_secret")
+        record = module.collect_work(self.root, "75")
+        self.assertNotIn(token, record["line"])
+        self.assertNotIn(token, (folder / "result.md").read_text(encoding="utf-8"))
+        self.assertNotIn(token, (folder / "worker-out.txt").read_text(encoding="utf-8"))
+        self.assertTrue(record["line"].startswith("PASS"))
+        self.assertFalse((self.root / "marker.txt").exists())
+
+    def test_stall_notice_for_a_live_worker(self) -> None:
+        module = load_module(SCRIPT, "orchestrator_stall")
+        self.assertEqual(module.STALL_LIMIT_SECONDS, 900)
+        old = module.datetime(2026, 11, 26, 0, 0, tzinfo=module.timezone.utc)
+        now = old + module.timedelta(seconds=901)
+        self.assertEqual(module.stall_notice(True, old, now), "멈춤 의심")
+        self.assertEqual(module.stall_notice(True, now, now), "")
+        self.assertEqual(module.stall_notice(False, old, now), "")
+
+    def test_cli_judge_and_collect(self) -> None:
+        folder = self.root / ".team" / "sessions" / "75"
+        folder.mkdir(parents=True)
+        (folder / "result.md").write_text(
+            "# 결과\n\n## 결과\n\n\n## 교훈 후보\n\n- EXTRA-BODY\n",
+            encoding="utf-8",
+        )
+        (folder / "state.md").write_text("# 상태\n\n## 다음 할 일\n\n고쳤다\n", encoding="utf-8")
+        judged = run_orch(self.root, "judge", "--exit", "0", "--line", "ISSUES 남음", "--next-updated")
+        self.assertEqual(judged.returncode, 0, judged.stderr)
+        self.assertEqual(parse_record(judged.stdout)["state"], "문제")
+        collected = run_orch(self.root, "collect", "--work", "75")
+        self.assertEqual(collected.returncode, 0, collected.stderr)
+        parsed = parse_record(collected.stdout)
+        self.assertEqual(parsed["state"], "미완")
+        self.assertNotIn("EXTRA-BODY", collected.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
