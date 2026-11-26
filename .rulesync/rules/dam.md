@@ -31,7 +31,7 @@ globs: ["**/*"]
 - 세션을 시작하거나 compact 뒤에는 `.team/board.md`와 열린 작업의 state.md만 읽는다. log.md 전체를 시작 컨텍스트에 넣지 않는다.
 - 첫 답은 세 줄이다. 모드와 이유 한 줄, 작업 이름, state.md의 다음 할 일. 모드 이름: 조사, 작은 수정, 기능, 이어받기. 두 모드에 걸치면 세션당 질문은 한 번이고, 고를 것 둘과 기본값(코드를 덜 바꾸는 쪽)을 적는다. 기준과 예시 네 개는 ADR 0008이다.
 - 재개도 위와 같은 log.md 한 줄이다. 도구 칸에 `Claude Code` 또는 `Codex`를 적는다.
-- 세션 시작 출력은 `python3 scripts/team-session.py start-context`다. 브랜치 끝 이슈 번호의 작업 하나만 고르고, 번호가 없으면 현황판의 열린 줄만 낸다. 도구를 바꿀 때는 `start-context --switch`로 그 로그의 마지막 5줄만 더한다. 로그 전체는 넣지 않는다. 시작 주입이 4,000자를 넘거나 상태 파일이 2,000자를 넘으면 본문 대신 줄이라는 한 줄만 낸다. `summary <작업ID>`는 state.md만 내는 호환 명령으로 남고, 10,000자를 넘으면 실패한다 (https://github.com/rimoir/dam/issues/2).
+- 세션 시작 출력은 `python3 scripts/team-session.py start-context`다. 브랜치 끝 이슈 번호의 작업 하나만 고르고, 상태 파일 첫 줄의 모드를 같이 낸다. 번호가 없거나 열린 작업이 아니면 작업 줄은 없음과 열린 줄 수다. 도구를 바꿀 때는 `start-context --switch`로 그 로그의 마지막 5줄만 더한다. 로그 전체는 넣지 않는다. 시작 주입이 4,000자를 넘거나 상태 파일이 2,000자를 넘으면 본문 대신 줄이라는 한 줄만 낸다. `summary <작업ID>`는 state.md만 내는 호환 명령으로 남고, 10,000자를 넘으면 실패한다 (https://github.com/rimoir/dam/issues/2).
 - Codex에서 새 작업을 시작할 때도 `python3 scripts/team-session.py new <작업ID>`를 쓴다. Codex 전용 생성기는 없다.
 - Codex도 계획을 task.md에 쓴 뒤 사람의 go를 기다린다. go 전에는 `git status`로 코드 파일이 바뀌지 않았는지 확인한다. 그 go 줄의 도구 칸은 `Codex`다.
 - Codex가 남기는 state.md와 log.md는 Claude Code와 같은 칸이다 (https://github.com/rimoir/dam/issues/3).

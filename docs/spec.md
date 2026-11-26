@@ -18,7 +18,7 @@
 
 ## 세션 시작
 
-`python3 scripts/team-session.py start-context`는 `.team/board.md`의 열린 줄과, 브랜치 이름이 이슈 번호로 끝날 때 그 작업 하나의 `state.md`만 낸다. 번호가 없으면 열린 줄만 낸다. 상태 `완료`와 `닫힘`은 열린 줄이 아니다. 도구를 바꿀 때는 `start-context --switch`로 그 로그의 마지막 5줄만 더하고, 로그 전체는 넣지 않는다. 시작 주입 4,000자 또는 상태 파일 2,000자를 넘으면 본문 대신 줄이라는 한 줄만 낸다. 이 값은 측정 전 임시 상한이다. `summary`는 state.md만 내는 호환 명령으로 남는다.
+`python3 scripts/team-session.py start-context`는 `.team/board.md`의 열린 줄과, 브랜치 이름이 이슈 번호로 끝날 때 그 작업 하나의 `state.md`만 낸다. 그 상태 파일 첫 줄이 `모드:`로 시작하면 그 줄도 출력에 남는다. 첫 줄이 없어도 오류는 아니다. 번호가 없거나 그 번호가 열린 줄이 아니면 작업 줄은 `작업: 없음 (열린 줄 N)`이다. 상태 `완료`와 `닫힘`은 열린 줄이 아니다. 도구를 바꿀 때는 `start-context --switch`로 그 로그의 마지막 5줄만 더하고, 로그 전체는 넣지 않는다. 시작 주입 4,000자 또는 상태 파일 2,000자를 넘으면 본문 대신 줄이라는 한 줄만 낸다. 이 값은 측정 전 임시 상한이다. `summary`는 state.md만 내는 호환 명령으로 남는다.
 
 `python3 scripts/team-session.py rotate <작업ID>`는 log.md가 200줄을 넘으면 앞부분을 `.team/sessions/<작업ID>/log/001.md`로 옮기고, log.md에는 최근 줄과 `이전: log/001.md`만 남긴다. 옮긴 내용은 바꾸지 않는다. 다시 넘으면 `002.md`다. `python3 scripts/team-session.py check`는 상태 파일 2,000자, 시작 주입 4,000자, 로그 200줄을 넘기면 실패한다. `notes.md`만 있는 폴더는 보지 않는다. 로그 200줄도 측정 전 임시 상한이다.
 
@@ -28,7 +28,7 @@
 
 파일 역할은 그대로다. task.md는 목표와 완료 기준과 계획이고 시작 때 읽지 않는다. state.md는 지금 상태, 결정, 다음 할 일을 덮어 쓰며 시작 때 열린 작업 하나만 읽는다. log.md는 한 줄씩 추가하고, 넘치면 log/로 옮긴다. result.md는 끝날 때 결과와 교훈 후보다. board.md는 작업당 한 줄이고 열린 줄만 읽는다.
 
-읽기 계약: 새 세션, /compact, resume, clear는 같은 start-context다. 장치 매처는 `startup|resume|clear|compact`다. 열린 작업은 브랜치 끝 번호다. 번호가 없으면 열린 줄만 낸다. 상한을 넘으면 본문 대신 줄이라는 한 줄만 낸다.
+읽기 계약: 새 세션, /compact, resume, clear는 같은 start-context다. 장치 매처는 `startup|resume|clear|compact`다. 열린 작업은 브랜치 끝 번호다. 번호가 없거나 열린 작업이 아니면 작업 줄은 `작업: 없음 (열린 줄 N)`이다. 상한을 넘으면 본문 대신 줄이라는 한 줄만 낸다.
 
 줄이기: state.md는 세 칸만 덮어 쓴다. log.md 앞부분은 지우지 않고 log/로 옮긴다. 요약은 state.md, docs/adr, result.md, kb/ 중 내용에 맞는 곳에 두고 새 요약 파일은 만들지 않는다. 기존 notes.md 폴더는 옮기지 않는다.
 

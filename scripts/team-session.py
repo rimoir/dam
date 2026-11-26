@@ -74,6 +74,7 @@ def templates(work_id: str) -> dict[str, str]:
     return {
         "task.md": render_task(work_id, None),
         "state.md": (
+            "모드:\n\n"
             f"# 상태 {work_id}\n\n"
             "## 지금 상태\n\n"
             "시작\n\n"
