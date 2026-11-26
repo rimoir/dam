@@ -1119,5 +1119,19 @@ class ModeDeclarationTest(unittest.TestCase):
         self.assertNotIn("기능은 그리되 코드는 넣지 말라", adr)
 
 
+class SmallFixRuleTest(unittest.TestCase):
+    def test_rule_says_one_line_plan_and_file_count(self) -> None:
+        rule = (ROOT / ".rulesync/rules/dam.md").read_text(encoding="utf-8")
+        self.assertIn("계획 한 줄", rule)
+        self.assertIn("워커를 띄우지 않는다", rule)
+        self.assertIn("모드: 작은 수정 (이유: 파일 1곳)", rule)
+        self.assertIn("세 파일 이상이면 기능", rule)
+        self.assertLessEqual(len(rule.splitlines()), 50)
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            generated = (ROOT / name).read_text(encoding="utf-8")
+            self.assertIn("워커를 띄우지 않는다", generated)
+            self.assertIn("모드: 작은 수정 (이유: 파일 1곳)", generated)
+
+
 if __name__ == "__main__":
     unittest.main()
