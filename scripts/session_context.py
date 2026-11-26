@@ -82,7 +82,9 @@ def assembled_start_context(root: Path, branch: str, switch: bool = False) -> tu
     chunks: list[str] = []
     if lines:
         chunks.append("\n".join(line for _work_id, line in lines) + "\n")
-    if state_text:
+    if selected is None:
+        chunks.append(f"작업: 없음 (열린 줄 {len(lines)})\n")
+    elif state_text:
         chunks.append(state_text)
         if not state_text.endswith("\n"):
             chunks.append("\n")

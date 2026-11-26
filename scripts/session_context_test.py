@@ -229,10 +229,13 @@ class StartContextTest(unittest.TestCase):
         self.assertNotIn("STATE-KEEP", text)
         self.assertNotIn("L19", text)
 
-    def test_missing_board_is_empty(self) -> None:
+    def test_missing_board_says_none_and_zero_open_lines(self) -> None:
         bare = Path(self.tmp.name) / "bare"
         bare.mkdir()
-        self.assertEqual(render_start_context(bare, "work-43", switch=True), "")
+        self.assertEqual(
+            render_start_context(bare, "work-43", switch=True),
+            "작업: 없음 (열린 줄 0)\n",
+        )
 
     def test_missing_state_file_keeps_open_lines(self) -> None:
         (self.root / ".team" / "sessions" / "43" / "state.md").unlink()
