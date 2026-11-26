@@ -8,3 +8,4 @@
 예: `2026-11-26T00:00:00Z Codex go 계획 승인`
 2026-11-26T02:31:34Z Cursor 시작 이슈 45 SessionStart 훅
 2026-11-26T02:31:34Z Cursor go 저장소 안 훅만 두고 실패해도 세션을 막지 않는다
+2026-11-26T02:31:50Z Cursor push 브랜치 cursor/session-start-hooks-45-ed7f
