@@ -697,5 +697,56 @@ class GoScopeTest(unittest.TestCase):
         self.assertLessEqual(len(rule.splitlines()), 50)
 
 
+class ResumeModeTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        write_board(self.root, [board_line("70", "시작")])
+        folder = self.root / ".team" / "sessions" / "70"
+        folder.mkdir(parents=True)
+        (folder / "state.md").write_text(
+            "모드: 기능\n# 상태 70\n다음 할 일\n",
+            encoding="utf-8",
+        )
+        (folder / "log.md").write_text("2026-11-26T00:00:00Z Codex go 남음\n", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _run(self, *args: str, root: Path | None = None) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(root or self.root)
+        env["GITHUB_HEAD_REF"] = "work-70"
+        return subprocess.run(
+            ["python3", str(SCRIPT), "resume", *args],
+            cwd=root or self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_begin_records_previous_mode_and_end_restores_it(self) -> None:
+        begin = self._run("begin")
+        self.assertEqual(begin.returncode, 0, begin.stderr)
+        text = (self.root / ".team" / "sessions" / "70" / "state.md").read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("모드: 이어받기\n"))
+        self.assertIn("이전 모드: 기능\n", text)
+        self.assertIn("다음 할 일\n", text)
+        end = self._run("end")
+        self.assertEqual(end.returncode, 0, end.stderr)
+        after = (self.root / ".team" / "sessions" / "70" / "state.md").read_text(encoding="utf-8")
+        self.assertTrue(after.startswith("모드: 기능\n"))
+        self.assertNotIn("이전 모드:", after)
+        self.assertIn("다음 할 일\n", after)
+
+    def test_missing_state_does_not_create_a_file(self) -> None:
+        bare = Path(self.tmp.name) / "bare"
+        bare.mkdir()
+        result = self._run("begin", root=bare)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("상태 파일이 없다", result.stderr)
+        self.assertFalse((bare / ".team").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
