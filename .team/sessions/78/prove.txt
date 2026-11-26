@@ -1,0 +1,3 @@
+$ rg claude|codex|Popen scripts/orchestrator.py
+no-launcher
+$ python3 scripts/orchestrator_test.py
