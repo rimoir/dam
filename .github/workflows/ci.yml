@@ -58,7 +58,8 @@ jobs:
           tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
           test "$("$RUNNER_TEMP/gitleaks" version)" = "8.30.1"
       - name: scan working tree
-        run: "$RUNNER_TEMP/gitleaks" detect --source . --no-git -v
+        run: |
+          "$RUNNER_TEMP/gitleaks" detect --source . --no-git -v
       - name: scan added commits
         env:
           EVENT_NAME: ${{ github.event_name }}
