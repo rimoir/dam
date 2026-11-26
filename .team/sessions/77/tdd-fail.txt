@@ -1,0 +1,2 @@
+실패 검사 커밋 7e12669c032d52a4618f8f93861a6db7d8cd5f5f
+probe-steps 는 invalid choice

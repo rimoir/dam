@@ -1,0 +1,89 @@
+# HR P PC 실행 확인
+
+이 문서는 HR P PC에서 돌릴 절차다. 이 저장소의 개발 세션은 로그인하지 않고, 명령을 실행하지 않는다. 칸은 비어 있다.
+
+결과: 아직 없음
+
+샌드박스를 끄지 않는다. 승인을 전부 끄는 옵션도 쓰지 않는다. Codex가 작업 폴더의 커밋을 막으면 그 사실을 적고 #78은 멈춘다. 풀지는 HR P가 정한다.
+
+Claude Code의 물을 일을 거부하는 옵션은 v2.1.259 이상이라는 요건이 있다. 버전이 낮으면 그 사실을 적고, 샌드박스를 끄는 쪽으로 바꾸지 않는다.
+
+시험용 폴더와 브랜치는 `m5-try`뿐이다. dam 저장소의 브랜치는 지우지 않는다.
+
+## 0. 버전과 로그인
+
+```
+claude --version
+codex --version
+claude auth status
+```
+
+결과: 아직 없음
+
+## 1. 시험용 작업 폴더
+
+```
+cd ~/dam && git worktree add ../dam-m5-try -b m5-try origin/main
+```
+
+결과: 아직 없음
+
+## 2. Claude Code 읽기 전용
+
+```
+cd ../dam-m5-try
+claude -p "board.md의 열린 줄 수를 숫자 하나로만 답해" \
+  --output-format json --permission-mode plan --max-turns 3 > /tmp/m5-c.json
+```
+
+결과: 아직 없음
+
+## 3. 세션 재개
+
+```
+claude -p "방금 숫자를 한 번 더 말해" --resume "$(jq -r .session_id /tmp/m5-c.json)" --output-format json
+```
+
+결과: 아직 없음
+
+## 4. Codex 읽기 전용
+
+```
+codex exec -C ../dam-m5-try --sandbox read-only --json -o /tmp/m5-x.md \
+  "board.md의 열린 줄 수를 숫자 하나로만 답해"
+```
+
+결과: 아직 없음
+
+## 5. 커밋
+
+Codex가 작업 폴더 안에서 커밋할 수 있는지 본다. push는 넣지 않는다.
+
+```
+codex exec -C ../dam-m5-try --sandbox workspace-write \
+  "빈 파일 m5-probe.txt를 만들고 git add 뒤 probe로 커밋해"
+```
+
+결과: 아직 없음
+
+## 6. 시작 시간
+
+명령부터 첫 이벤트까지, 두 도구 각 5회 중간값이다.
+
+```
+claude -p "안녕" --output-format stream-json --verbose
+codex exec -C ../dam-m5-try --json "안녕"
+```
+
+결과: 아직 없음
+
+## 7. 정리
+
+시험용 폴더와 `m5-try` 브랜치만 정리한다.
+
+```
+cd ~/dam && git worktree remove --force ../dam-m5-try && git branch -D m5-try
+```
+
+결과: 아직 없음
+이 명령은 도구를 실행하지 않는다.
