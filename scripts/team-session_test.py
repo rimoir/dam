@@ -458,6 +458,75 @@ class IssueStartTest(unittest.TestCase):
         task = (team / "sessions" / "30" / "task.md").read_text(encoding="utf-8")
         self.assertIn("이슈 30", section_map(task)["목표"])
 
+    def test_criteria_heading_in_this_repo_fills_the_list(self) -> None:
+        payload = {
+            "title": "노트 쌓기",
+            "url": "https://github.com/rimoir/dam/issues/2",
+            "body": (
+                "### 사용자 관점의 완료 조건\n\n"
+                "검증은 실제 세션과 생성된 파일로 한다.\n\n"
+                "- [ ] 첫 조건\n"
+                "- [x] 둘째 조건\n"
+            ),
+        }
+        result = run(self.root, "new", "2", gh_json=payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        criteria = section_map(
+            (self.root / ".team" / "sessions" / "2" / "task.md").read_text(encoding="utf-8")
+        )["완료 기준"]
+        self.assertIn("- 첫 조건", criteria)
+        self.assertIn("- 둘째 조건", criteria)
+        self.assertNotIn("(없음)", criteria)
+
+    def test_bom_lock_does_not_call_github(self) -> None:
+        team = self.root / ".team"
+        team.mkdir(parents=True)
+        (team / "adapters.lock").write_bytes("\ufeffissue-tracker: linear\n".encode("utf-8"))
+        result = run(self.root, "new", "30")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("linear", result.stderr)
+        self.assertFalse((team / "sessions").exists())
+        self.assertFalse((self.root / "gh.log").exists())
+
+    def test_unreadable_lock_leaves_no_notes(self) -> None:
+        team = self.root / ".team"
+        team.mkdir(parents=True)
+        (team / "adapters.lock").write_bytes(b"\xff\xfeissue")
+        result = run(self.root, "new", "30")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("adapters.lock", result.stderr)
+        self.assertFalse((team / "sessions").exists())
+        self.assertFalse((self.root / "gh.log").exists())
+
+    def test_failed_write_leaves_no_session(self) -> None:
+        bindir = install_fake_gh(self.root)
+        payload = self.root / "issue.json"
+        payload.write_text(
+            json.dumps(
+                {
+                    "title": "큰" + ("가" * 2000),
+                    "url": "https://github.com/rimoir/dam/issues/30",
+                    "body": "### Acceptance Criteria\n\n- [ ] 긴 조건\n",
+                }
+            ),
+            encoding="utf-8",
+        )
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+        env["GH_JSON_FILE"] = str(payload)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        result = subprocess.run(
+            ["bash", "-c", 'ulimit -f 1; python3 "$1" new 30', "bash", str(SCRIPT)],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.root / ".team" / "sessions" / "30").exists())
+        self.assertFalse((self.root / ".team" / "board.md").exists())
+
     def test_write_without_command_does_not_call_runner(self) -> None:
         tracker_mod = load_module(TRACKER, "issue_tracker_under_test")
         called: list[list[str]] = []

@@ -121,11 +121,16 @@ def ensure_board(root: Path, work_id: str, session: str) -> None:
 def _drop_created(folder: Path, created_folder: bool, created_files: list[Path]) -> None:
     for path in created_files:
         path.unlink(missing_ok=True)
-    if created_folder:
-        try:
-            folder.rmdir()
-        except OSError:
-            return
+    if not created_folder:
+        return
+    try:
+        folder.rmdir()
+    except OSError:
+        return
+    try:
+        folder.parent.rmdir()
+    except OSError:
+        return
 
 
 def create_session(root: Path, work_id: str, session: str, tracker=None) -> None:
@@ -150,8 +155,8 @@ def create_session(root: Path, work_id: str, session: str, tracker=None) -> None
             path = folder / name
             if path.exists():
                 continue
-            path.write_text(body, encoding="utf-8")
             created_files.append(path)
+            path.write_text(body, encoding="utf-8")
         ensure_board(root, work_id, session)
     except Exception:
         _drop_created(folder, created_folder, created_files)

@@ -19,3 +19,8 @@ missing_session False
 missing_board False
 
 이 읽기는 VM의 gh 로그인으로 했다. 사람 계정 로그인 확인은 HR P 게이트로 남긴다.
+
+검토 재확인:
+- adapters.lock에 BOM과 issue-tracker: linear가 있으면 종료 1, stderr에 linear, gh 호출 없음, 세션 없음
+- 파일 크기 제한으로 task.md 쓰기가 실패하면 sessions/30이 남지 않음. 종료 1
+- new 2의 완료 기준에 이슈 2 제목 '사용자 관점의 완료 조건' 아래 목록 7줄. '(없음)'은 없다

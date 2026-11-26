@@ -4,7 +4,7 @@
 
 이슈 번호로 작업을 시작하면 issue-tracker 어댑터가 제목, 이슈 링크, 완료 기준 목록을 task.md의 목표와 완료 기준에 넣는다. 가짜 읽기 객체와 gh 읽기가 같은 task.md를 만든다. 읽기에 실패하면 노트가 생기지 않고, 이미 쓴 노트는 덮어쓰지 않는다.
 
-로컬에서 `python3 scripts/team-session_test.py` 24개 통과. rulesync `43.14.0` 재생성 sha256 `2099529439fc78606a2fe403c8bdcf1fa75b2ba353a5c5778810502c4724d72c`가 `CLAUDE.md`와 `AGENTS.md`에서 다시 만들어도 같다. gitleaks `8.30.1` 작업 트리와 이력에서 no leaks found.
+로컬에서 `python3 scripts/team-session_test.py` 28개 통과. 검토에서 확인한 세 가지(BOM이 있는 선택 파일을 github로 읽던 것, 쓰다 실패한 task.md 조각, 이슈 2의 완료 조건 목록이 빠지던 것)를 고친 뒤에도 통과한다. rulesync `43.14.0` 재생성 sha256 `2099529439fc78606a2fe403c8bdcf1fa75b2ba353a5c5778810502c4724d72c`가 `CLAUDE.md`와 `AGENTS.md`에서 다시 만들어도 같다. gitleaks `8.30.1` 작업 트리와 이력에서 no leaks found.
 
 VM의 gh로 이슈 30을 읽어 이 폴더의 task.md 목표와 완료 기준을 만들었다. 없는 이슈는 이유를 알리고 노트를 남기지 않았다. 사람 계정 로그인 확인은 HR P 게이트로 남긴다.
 

@@ -68,26 +68,22 @@ def github_slug(remote_url: str) -> str | None:
     return None
 
 
-def _section(body: str, title: str) -> str | None:
+def _heading_sections(body: str) -> list[tuple[str, str]]:
     lines = body.splitlines()
-    start = None
-    level = 0
-    wanted = title.casefold()
+    heads: list[tuple[int, int, str]] = []
     for index, line in enumerate(lines):
         match = _HEADING.match(line)
-        if match and match.group(2).strip().casefold() == wanted:
-            start = index + 1
-            level = len(match.group(1))
-            break
-    if start is None:
-        return None
-    end = len(lines)
-    for index in range(start, len(lines)):
-        match = _HEADING.match(lines[index])
-        if match and len(match.group(1)) <= level:
-            end = index
-            break
-    return "\n".join(lines[start:end])
+        if match:
+            heads.append((index, len(match.group(1)), match.group(2).strip()))
+    sections: list[tuple[str, str]] = []
+    for pos, (index, level, title) in enumerate(heads):
+        end = len(lines)
+        for later, later_level, _title in heads[pos + 1 :]:
+            if later_level <= level:
+                end = later
+                break
+        sections.append((title, "\n".join(lines[index + 1 : end])))
+    return sections
 
 
 def _list_items(section: str | None) -> list[str]:
@@ -104,16 +100,27 @@ def _list_items(section: str | None) -> list[str]:
     return items
 
 
+def _criteria_heading(title: str) -> bool:
+    folded = title.casefold()
+    return (
+        "acceptance criteria" in folded
+        or "완료 기준" in title
+        or "완료 조건" in title
+    )
+
+
 def acceptance_from_body(body: str) -> tuple[str, ...]:
-    items = _list_items(_section(body, "Acceptance Criteria"))
-    if not items:
-        items = _list_items(_section(body, "완료 기준"))
-    if not items:
-        items = []
-        for line in body.splitlines():
-            match = _COVERS.match(line)
-            if match and match.group(1).strip():
-                items.append(match.group(1).strip())
+    for title, content in _heading_sections(body):
+        if not _criteria_heading(title):
+            continue
+        items = _list_items(content)
+        if items:
+            return tuple(items)
+    items: list[str] = []
+    for line in body.splitlines():
+        match = _COVERS.match(line)
+        if match and match.group(1).strip():
+            items.append(match.group(1).strip())
     return tuple(items)
 
 
@@ -237,8 +244,8 @@ def lock_tracker(notes_root: Path) -> str:
     if not path.is_file():
         return "github"
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
+        text = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeError):
         raise IssueTrackerError("이슈를 읽지 못했다: adapters.lock을 읽지 못했다") from None
     for raw in text.splitlines():
         line = raw.split("#", 1)[0].strip()

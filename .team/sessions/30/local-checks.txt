@@ -1,5 +1,5 @@
 python3 scripts/team-session_test.py
-Ran 24 tests
+Ran 28 tests
 OK
 python_exit: 0
 
