@@ -20,6 +20,7 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+from issue_tracker import redact  # noqa: E402
 from session_context import _named_section, _plan_path, log_has_go, read_plan_units  # noqa: E402
 
 FIELDS = ("ok", "handle", "state", "line", "reason")
@@ -27,13 +28,7 @@ KNOWN = frozenset({"native", "fake"})
 HANDLE = re.compile(r"^(native|fake)-[0-9]+$")
 WORKER_LIMIT = 3  # 임시. 측정 뒤 고친다.
 STALL_LIMIT_SECONDS = 900  # 임시. 측정 뒤 고친다.
-_SECRET = re.compile(
-    r"ghp_[A-Za-z0-9]{36}"
-    r"|github_pat_[A-Za-z0-9_]{20,}"
-    r"|sk-[A-Za-z0-9]{20,}"
-    r"|xox[baprs]-[A-Za-z0-9-]{10,}"
-    r"|AKIA[0-9A-Z]{16}"
-)
+_NOTE_SUFFIXES = {".md", ".txt", ".json"}
 
 
 class OrchestratorError(Exception):
@@ -360,7 +355,22 @@ def worker_brief(repo: Path, work_id: str) -> str:
 
 
 def redact_secret(text: str) -> str:
-    return _SECRET.sub("숨김", text)
+    return redact(text)
+
+
+def scrub_notes(folder: Path) -> None:
+    if not folder.is_dir():
+        return
+    for path in folder.iterdir():
+        if not path.is_file() or path.suffix not in _NOTE_SUFFIXES:
+            continue
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        cleaned = redact(raw)
+        if cleaned != raw:
+            path.write_text(cleaned, encoding="utf-8")
 
 
 def judge(
@@ -415,6 +425,7 @@ def collect_work(root: Path, work_id: str, exit_code: int = 0) -> dict[str, str]
         (folder / "worker-out.txt").write_text(line + "\n", encoding="utf-8")
     state = state_path.read_text(encoding="utf-8") if state_path.is_file() else ""
     kind = judge(exit_code, line, next_action_updated(state))
+    scrub_notes(folder)
     return blank(ok="예", state=kind, line=line)
 
 
