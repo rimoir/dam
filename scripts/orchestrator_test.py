@@ -357,6 +357,53 @@ class GateTest(unittest.TestCase):
         self.assertEqual(started.returncode, 0, started.stderr)
         self.assertTrue(parse_record(started.stdout)["handle"].startswith("native-"))
 
+    def test_start_unit_without_go_does_not_open_a_handle(self) -> None:
+        write_work(
+            self.root,
+            "73",
+            "- 읽기 | 없음 | scripts/a.py | python3 scripts/a_test.py",
+            NO_GO,
+        )
+        done = run_orch(self.root, "start", "--unit", "읽기")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("go", done.stdout)
+        self.assertFalse((self.root / ".team" / "orchestrator").exists())
+
+    def test_dependency_starts_the_ready_unit_then_the_next(self) -> None:
+        write_work(
+            self.root,
+            "73",
+            "- 읽기 | 없음 | scripts/a.py | python3 scripts/a_test.py\n"
+            "- 쓰기 | 읽기 | scripts/b.py | python3 scripts/b_test.py",
+            GO,
+        )
+        first = run_orch(self.root, "start", "--work", "73")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        parsed = parse_record(first.stdout)
+        self.assertEqual(parsed["state"], "허용")
+        self.assertIn("읽기", parsed["line"])
+        self.assertNotIn("쓰기", parsed["line"])
+        self.assertTrue(parsed["handle"].startswith("native-"))
+        named = run_orch(self.root, "start", "--work", "73", "--unit", "읽기")
+        self.assertEqual(named.returncode, 0, named.stderr)
+        self.assertIn("읽기", parse_record(named.stdout)["line"])
+        nxt = run_orch(
+            self.root,
+            "start",
+            "--work",
+            "73",
+            "--unit",
+            "쓰기",
+            "--finished",
+            "읽기",
+        )
+        self.assertEqual(nxt.returncode, 0, nxt.stderr)
+        self.assertIn("쓰기", parse_record(nxt.stdout)["line"])
+        self.assertTrue(parse_record(nxt.stdout)["handle"].startswith("native-"))
+        admitted = run_orch(self.root, "admit", "--work", "73", "--finished", "읽기")
+        self.assertEqual(admitted.returncode, 0, admitted.stderr)
+        self.assertEqual(parse_record(admitted.stdout)["state"], "허용")
+
 
 def init_repo(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
