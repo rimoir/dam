@@ -8,3 +8,4 @@
 예: `2026-11-26T00:00:00Z Codex go 계획 승인`
 2026-11-26T01:43:40Z Cursor 시작 이슈 43 start-context
 2026-11-26T01:43:40Z Cursor go 열린 현황과 상태만 내는 구현
+2026-11-26T01:44:31Z Cursor push 브랜치 cursor/start-context-open-ed7f
