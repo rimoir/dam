@@ -160,14 +160,13 @@ def admit_work(
     done = set(finished or [])
     for name in names:
         dep = by_name[name][1].strip()
-        if not dep or dep == "없음":
+        if not dep or dep == "없음" or dep in done:
             continue
-        if dep in names or dep not in done:
-            return blank(
-                ok="아니오",
-                state="거부",
-                reason=f"앞 단위 결과가 입력이다: {dep}",
-            )
+        return blank(
+            ok="아니오",
+            state="거부",
+            reason=f"앞 단위 결과가 입력이다: {dep}",
+        )
     if running + len(names) > WORKER_LIMIT:
         return blank(
             ok="아니오",
@@ -177,6 +176,58 @@ def admit_work(
     return blank(ok="예", state="허용", line=" ".join(names))
 
 
+def _ready_names(root: Path, work_id: str, finished: list[str] | None) -> list[str] | dict[str, str]:
+    folder = root / ".team" / "sessions" / work_id
+    task_path = folder / "task.md"
+    if not task_path.is_file():
+        return blank(ok="아니오", state="거부", reason=f"task.md가 없다: {work_id}")
+    log_path = folder / "log.md"
+    log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
+    if not log_has_go(log_text):
+        return blank(ok="아니오", state="거부", reason="go 없는 작업이다")
+    units = read_plan_units(task_path.read_text(encoding="utf-8"))
+    if not units:
+        return blank(ok="아니오", state="거부", reason="계획 단위가 없다")
+    done = set(finished or [])
+    ready: list[str] = []
+    blocked = ""
+    for name, dep, _files, _check in units:
+        if name in done:
+            continue
+        dep = dep.strip()
+        if dep and dep != "없음" and dep not in done:
+            blocked = f"앞 단위 결과가 입력이다: {dep}"
+            continue
+        ready.append(name)
+    if not ready:
+        return blank(ok="아니오", state="거부", reason=blocked or "계획 단위가 없다")
+    return ready
+
+
+def work_owning_unit(root: Path, unit: str) -> str | None:
+    sessions = root / ".team" / "sessions"
+    if not sessions.is_dir():
+        return None
+    found: list[str] = []
+    for folder in sorted(path for path in sessions.iterdir() if path.is_dir()):
+        task = folder / "task.md"
+        if not task.is_file():
+            continue
+        try:
+            text = task.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        for name, _dep, _files, _check in read_plan_units(text):
+            if name == unit:
+                found.append(folder.name)
+                break
+    if len(found) > 1:
+        return "*"
+    if len(found) == 1:
+        return found[0]
+    return None
+
+
 def start_work(
     root: Path,
     work_id: str,
@@ -184,6 +235,11 @@ def start_work(
     selected: list[str] | None = None,
     finished: list[str] | None = None,
 ) -> dict[str, str]:
+    if selected is None:
+        ready = _ready_names(root, work_id, finished)
+        if isinstance(ready, dict):
+            return ready
+        selected = ready
     decision = admit_work(
         root,
         work_id,
@@ -316,6 +372,7 @@ def main(argv: list[str] | None = None) -> int:
     start_cmd.add_argument("--unit", default="")
     start_cmd.add_argument("--work", default="")
     start_cmd.add_argument("--running", type=int, default=0)
+    start_cmd.add_argument("--finished", action="append", default=[])
     admit_cmd = sub.add_parser("admit", help="시작 전 검사를 읽고 허용 또는 거부를 낸다.")
     admit_cmd.add_argument("--work", required=True)
     admit_cmd.add_argument("--running", type=int, default=0)
@@ -334,9 +391,28 @@ def main(argv: list[str] | None = None) -> int:
     root = notes_root(args.root or None)
     try:
         if args.command == "start" and args.work:
-            record = start_work(root, args.work, running=args.running)
+            chosen = [args.unit] if args.unit else None
+            record = start_work(
+                root,
+                args.work,
+                running=args.running,
+                selected=chosen,
+                finished=args.finished or None,
+            )
         elif args.command == "start":
-            record = start(root, args.unit)
+            owner = work_owning_unit(root, args.unit) if args.unit else None
+            if owner == "*":
+                record = blank(ok="아니오", state="거부", reason="단위가 여러 작업에 있다")
+            elif owner:
+                record = start_work(
+                    root,
+                    owner,
+                    running=args.running,
+                    selected=[args.unit],
+                    finished=args.finished or None,
+                )
+            else:
+                record = start(root, args.unit)
         elif args.command == "admit":
             record = admit_work(
                 root,
