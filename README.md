@@ -67,3 +67,35 @@ codex
 ```
 
 저장소 루트에서 위 명령으로 연다. 열린 작업은 `.team/board.md`와 그 작업의 `state.md`를 읽고, log.md 한 줄의 도구 칸에는 `Codex`를 적는다. 새 작업은 `python3 scripts/team-session.py new <작업ID>`다.
+
+## 검사
+
+main으로 가는 pull request와 main push에서 같은 검사 세 개가 돈다. 로컬에서도 같은 명령을 쓴다. Node.js는 `22.22.0` 이상이다.
+
+테스트:
+
+```bash
+python3 scripts/team-session_test.py
+```
+
+rulesync `43.14.0` 재생성. 출력이 없으면 커밋된 `CLAUDE.md`, `AGENTS.md`와 같다.
+
+```bash
+npx --yes rulesync@43.14.0 generate --targets claudecode,codexcli
+git diff --exit-code -- CLAUDE.md AGENTS.md
+```
+
+gitleaks `8.30.1`. 작업 트리와, main 이후로 더한 커밋을 본다.
+
+```bash
+gitleaks detect --source . --no-git -v
+gitleaks detect --source . --log-opts="origin/main..HEAD" -v
+```
+
+## 머지
+
+첫 CI pull request는 검사가 아직 없으므로, 코드를 보고 남긴 검토 기록이 한 건 이상이면 머지한다. 연 뒤 1분이 지나기 전에는 머지하지 않는다.
+
+그 다음부터는 검사 세 개가 통과하고, 검토 기록이 있어야 한다. 검토 기록은 승인, 또는 사람이나 검토 봇이 코드를 보고 남긴 내용 있는 검토 코멘트다. "검토하지 못했다"는 봇 알림과 머지 자체는 기록이 아니다. pull request를 연 뒤 1분 안에 머지하지 않고, 리뷰 없이 머지하지 않는다.
+
+main을 브랜치 보호 또는 룰셋으로 막는 설정은 HR P가 적용한다. 자세한 결정은 `docs/adr/0003-ci-and-merge.md`다.
