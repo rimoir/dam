@@ -8,3 +8,4 @@
 예: `2026-11-26T00:00:00Z Codex go 계획 승인`
 2026-11-26T02:27:13Z Cursor 시작 이슈 44 로그 롤오버
 2026-11-26T02:27:13Z Cursor go 상한을 넘긴 로그를 log/로 옮긴다
+2026-11-26T02:27:14Z Cursor push 브랜치 cursor/log-rollover-44-ed7f
