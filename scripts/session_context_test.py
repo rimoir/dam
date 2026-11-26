@@ -386,5 +386,74 @@ class LogLimitTest(unittest.TestCase):
         self.assertEqual(archive + live[len("이전: log/001.md\n") :], original)
 
 
+class ModeCommandTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.state = "모드:\n\n# 상태 43\n\n## 다음 할 일\n\n계획을 쓴다\n"
+        write_note(self.root, "43", self.state, "L\n")
+        write_board(self.root, [board_line("43", "시작")])
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _run(self, *args: str, head_ref: str | None) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env.pop("GITHUB_HEAD_REF", None)
+        if head_ref is not None:
+            env["GITHUB_HEAD_REF"] = head_ref
+        return subprocess.run(
+            ["python3", str(SCRIPT), "mode", *args],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_mode_changes_only_the_first_line(self) -> None:
+        result = self._run("기능", head_ref="work-43")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = (self.root / ".team" / "sessions" / "43" / "state.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertTrue(text.startswith("모드: 기능\n"))
+        self.assertIn("## 다음 할 일\n\n계획을 쓴다\n", text)
+        self.assertEqual(text.count("모드:"), 1)
+
+    def test_unknown_mode_is_rejected(self) -> None:
+        before = (self.root / ".team" / "sessions" / "43" / "state.md").read_text(
+            encoding="utf-8"
+        )
+        result = self._run("자율", head_ref="work-43")
+        self.assertNotEqual(result.returncode, 0)
+        after = (self.root / ".team" / "sessions" / "43" / "state.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(after, before)
+
+    def test_no_open_work_creates_nothing(self) -> None:
+        bare = Path(self.tmp.name) / "bare"
+        bare.mkdir()
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(bare)
+        env["GITHUB_HEAD_REF"] = "cursor/no-number"
+        result = subprocess.run(
+            ["python3", str(SCRIPT), "mode", "조사"],
+            cwd=bare,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((bare / ".team").exists())
+
+    def test_command_bodies_match(self) -> None:
+        claude = (ROOT / ".claude" / "commands" / "mode.md").read_bytes()
+        codex = (ROOT / ".agents" / "skills" / "mode" / "SKILL.md").read_bytes()
+        self.assertEqual(claude, codex)
+        self.assertIn("python3 scripts/team-session.py mode".encode(), claude)
+
+
 if __name__ == "__main__":
     unittest.main()

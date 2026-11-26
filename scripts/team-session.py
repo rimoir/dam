@@ -29,6 +29,7 @@ from session_context import (  # noqa: E402
     limit_errors,
     render_start_context,
     rotate_log,
+    set_mode,
 )
 
 ISSUE_ID = re.compile(r"^[0-9]+$")
@@ -281,6 +282,8 @@ def main(argv: list[str] | None = None) -> int:
     rotate = sub.add_parser("rotate", help="로그가 상한을 넘으면 앞부분을 log/로 옮긴다.")
     rotate.add_argument("work_id")
     sub.add_parser("check", help="상태 파일과 로그와 시작 주입 상한을 검사한다.")
+    mode = sub.add_parser("mode", help="열린 작업 상태 파일 첫 줄의 모드만 바꾼다.")
+    mode.add_argument("name")
     args = parser.parse_args(argv)
     root = repo_root()
     try:
@@ -296,6 +299,8 @@ def main(argv: list[str] | None = None) -> int:
             refresh_board(root)
         elif args.command == "rotate":
             rotate_log(root, args.work_id)
+        elif args.command == "mode":
+            sys.stdout.write(set_mode(root, current_branch(root), args.name))
         elif args.command == "check":
             errors = limit_errors(root, current_branch(root))
             if errors:
