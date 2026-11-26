@@ -240,5 +240,123 @@ class TrackerRegressionTest(unittest.TestCase):
         self.assertIn("issue view 72", log)
 
 
+GO = "2026-11-26T00:00:00Z Codex go 승인\n"
+NO_GO = "2026-11-26T00:00:00Z Codex 시작 초안\n"
+
+
+def write_work(root: Path, work_id: str, plan: str, log: str) -> None:
+    folder = root / ".team" / "sessions" / work_id
+    folder.mkdir(parents=True)
+    (folder / "task.md").write_text(f"# 작업\n\n## 계획\n\n{plan}\n", encoding="utf-8")
+    (folder / "log.md").write_text(log, encoding="utf-8")
+
+
+class GateTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_missing_go_refuses_and_does_not_start(self) -> None:
+        write_work(
+            self.root,
+            "73",
+            "- 읽기 | 없음 | scripts/a.py | python3 scripts/a_test.py",
+            NO_GO,
+        )
+        module = load_module(SCRIPT, "orchestrator_gate_go")
+        decision = module.admit_work(self.root, "73", running=0)
+        self.assertEqual(decision["ok"], "아니오")
+        self.assertEqual(decision["state"], "거부")
+        self.assertIn("go", decision["reason"])
+        started = run_orch(self.root, "start", "--work", "73")
+        self.assertNotEqual(started.returncode, 0)
+        self.assertIn("go", started.stdout)
+        self.assertFalse((self.root / ".team" / "orchestrator").exists())
+
+    def test_overlapping_files_refuse_parallel(self) -> None:
+        write_work(
+            self.root,
+            "73",
+            "- 읽기 | 없음 | scripts/a.py | python3 scripts/a_test.py\n"
+            "- 쓰기 | 없음 | scripts/a.py docs/x.md | python3 scripts/b_test.py",
+            GO,
+        )
+        module = load_module(SCRIPT, "orchestrator_gate_overlap")
+        decision = module.admit_work(self.root, "73", running=0)
+        self.assertEqual(decision["state"], "거부")
+        self.assertIn("겹", decision["reason"])
+        self.assertIn("scripts/a.py", decision["reason"])
+
+    def test_parent_directory_overlaps_and_suffix_does_not(self) -> None:
+        module = load_module(SCRIPT, "orchestrator_gate_dir")
+        self.assertTrue(module.paths_overlap("scripts", "scripts/a.py"))
+        self.assertFalse(module.paths_overlap("scripts/a.py", "scripts/a.py.bak"))
+        write_work(
+            self.root,
+            "73",
+            "- 상위 | 없음 | scripts | python3 scripts/a_test.py\n"
+            "- 하위 | 없음 | scripts/a.py | python3 scripts/a_test.py",
+            GO,
+        )
+        decision = module.admit_work(self.root, "73", running=0)
+        self.assertEqual(decision["state"], "거부")
+        self.assertIn("겹", decision["reason"])
+
+    def test_result_dependency_refuses_parallel_until_finished(self) -> None:
+        write_work(
+            self.root,
+            "73",
+            "- 읽기 | 없음 | scripts/a.py | python3 scripts/a_test.py\n"
+            "- 쓰기 | 읽기 | scripts/b.py | python3 scripts/b_test.py",
+            GO,
+        )
+        module = load_module(SCRIPT, "orchestrator_gate_dep")
+        both = module.admit_work(self.root, "73", running=0)
+        self.assertEqual(both["state"], "거부")
+        self.assertIn("결과", both["reason"])
+        waiting = module.admit_work(self.root, "73", running=0, selected=["쓰기"])
+        self.assertEqual(waiting["state"], "거부")
+        done = module.admit_work(
+            self.root, "73", running=0, selected=["쓰기"], finished=["읽기"]
+        )
+        self.assertEqual(done["ok"], "예")
+        self.assertEqual(done["state"], "허용")
+
+    def test_running_limit_refuses(self) -> None:
+        write_work(
+            self.root,
+            "73",
+            "- 읽기 | 없음 | scripts/a.py | python3 scripts/a_test.py",
+            GO,
+        )
+        module = load_module(SCRIPT, "orchestrator_gate_limit")
+        self.assertEqual(module.WORKER_LIMIT, 3)
+        over = module.admit_work(self.root, "73", running=3)
+        self.assertEqual(over["state"], "거부")
+        self.assertIn("3", over["reason"])
+        ok = module.admit_work(self.root, "73", running=2)
+        self.assertEqual(ok["state"], "허용")
+
+    def test_cli_allows_a_clean_plan(self) -> None:
+        write_work(
+            self.root,
+            "73",
+            "- 읽기 | 없음 | scripts/a.py | python3 scripts/a_test.py\n"
+            "- 쓰기 | 없음 | scripts/b.py | python3 scripts/b_test.py",
+            GO,
+        )
+        done = run_orch(self.root, "admit", "--work", "73", "--running", "0")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        parsed = parse_record(done.stdout)
+        self.assertEqual(tuple(parsed), FIELDS)
+        self.assertEqual(parsed["state"], "허용")
+        started = run_orch(self.root, "start", "--work", "73", "--running", "0")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        self.assertTrue(parse_record(started.stdout)["handle"].startswith("native-"))
+
+
 if __name__ == "__main__":
     unittest.main()
