@@ -6,7 +6,7 @@
 
 ## 결정
 
-issue-tracker 선택 결과는 `.team/adapters.lock`에 둔다. 형식은 한 줄 `issue-tracker: <이름>`이다. `#`로 시작하는 주석은 빼고, 다른 키는 읽지 않는다. 파일이 없거나 `issue-tracker` 키가 없으면 github다.
+issue-tracker 선택 결과는 `.team/adapters.lock`에 둔다. 형식은 `issue-tracker: <이름>` 줄이다. `#`로 시작하는 주석은 빼고, issue-tracker 읽기는 다른 키를 읽지 않는다. 파일이 없거나 `issue-tracker` 키가 없으면 github다. `orchestrator: <이름>` 줄은 `scripts/orchestrator.py`만 읽는다. 그 파일이 없거나 키가 없으면 native다. 시험용 fake는 제품 이름이 아니다.
 
 기본 구현은 github다. 이슈 읽기는 사람이 이미 로그인한 gh CLI의 `gh issue view`만 쓴다. 새 토큰을 만들지 않고, 이 파일과 노트와 로그에 토큰을 적지 않는다. lock 값이 github가 아니면 작업 시작은 이유를 알리고 노트를 만들지 않는다.
 
