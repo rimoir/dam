@@ -20,6 +20,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 from issue_tracker import (  # noqa: E402
     IssueRecord,
     IssueTrackerError,
+    WorkView,
     load_tracker,
     redact,
 )
@@ -164,6 +165,47 @@ def create_session(root: Path, work_id: str, session: str, tracker=None) -> None
         raise
 
 
+_BOARD_ISSUE = re.compile(r"^(- [0-9]+: 상태 [^,\n]+, 담당 [^,\n]+, 막힘 [^,\n]+)")
+
+
+def github_clause(view: WorkView) -> str:
+    if view.issue_closed:
+        return "GitHub 닫힘"
+    if view.pull_state == "open":
+        word = {"pass": "통과", "fail": "실패", "pending": "아직 안 돎"}.get(
+            view.checks, "아직 안 돎"
+        )
+        return f"GitHub 검토 중, 검사 {word}"
+    if view.pull_state == "merged":
+        return "GitHub 완료"
+    return "GitHub 열림"
+
+
+def refresh_board(root: Path, tracker=None) -> None:
+    path = root / ".team" / "board.md"
+    if not path.is_file():
+        raise SystemExit("board.md가 없다")
+    original = path.read_text(encoding="utf-8")
+    active = tracker if tracker is not None else load_tracker(root)
+    pieces: list[str] = []
+    for line in original.splitlines(keepends=True):
+        match = _BOARD_ISSUE.match(line.rstrip("\n"))
+        if match is None:
+            pieces.append(line)
+            continue
+        prefix = match.group(1)
+        number = prefix.split(":", 1)[0][2:]
+        view = active.read_status(int(number))
+        ending = "\n" if line.endswith("\n") else ""
+        pieces.append(f"{prefix}, {github_clause(view)}{ending}")
+    updated = "".join(pieces)
+    if updated == original:
+        return
+    temporary = path.with_name("board.md.tmp")
+    temporary.write_text(updated, encoding="utf-8")
+    temporary.replace(path)
+
+
 def open_work_pr(root: Path, work_id: str, title: str, tool: str, tracker=None) -> str:
     if tool not in ("Claude Code", "Codex"):
         raise SystemExit("도구는 Claude Code 또는 Codex다")
@@ -213,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     pull.add_argument("work_id")
     pull.add_argument("--title", required=True)
     pull.add_argument("--tool", required=True)
+    sub.add_parser("board", help="현황판을 읽기로 갱신한다.")
     args = parser.parse_args(argv)
     root = repo_root()
     try:
@@ -222,6 +265,8 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(summary_text(root, args.work_id))
         elif args.command == "pull":
             sys.stdout.write(open_work_pr(root, args.work_id, args.title, args.tool) + "\n")
+        elif args.command == "board":
+            refresh_board(root)
     except IssueTrackerError as exc:
         print(redact(str(exc)), file=sys.stderr)
         return 1

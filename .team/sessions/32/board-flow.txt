@@ -1,0 +1,21 @@
+읽기 전용. TEAM_ROOT는 임시 디렉터리.
+
+python3 scripts/team-session.py board
+exit 0
+
+전
+- 30: 상태 시작, 담당 dev, 막힘 없음
+- 31: 상태 시작, 담당 dev, 막힘 없음
+- 2026-11-26-memo: 상태 시작, 담당 dev, 막힘 없음
+
+후
+- 30: 상태 시작, 담당 dev, 막힘 없음, GitHub 닫힘
+- 31: 상태 시작, 담당 dev, 막힘 없음, GitHub 검토 중, 검사 통과
+- 2026-11-26-memo: 상태 시작, 담당 dev, 막힘 없음
+
+이슈 30은 닫혀 있다. 이슈 31의 열린 PR 검사는 통과다. 날짜형 줄은 그대로다.
+
+rulesync 43.14.0
+CLAUDE.md sha256 0f9405a7a586b49acf478d4cbd00f59c61a267444e3edd54e30095b3b231699a
+AGENTS.md sha256 0f9405a7a586b49acf478d4cbd00f59c61a267444e3edd54e30095b3b231699a
+다시 생성해도 같음
