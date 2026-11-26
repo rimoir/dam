@@ -11,11 +11,18 @@ import json
 import os
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
+from session_context import _plan_path, log_has_go, read_plan_units  # noqa: E402
 
 FIELDS = ("ok", "handle", "state", "line", "reason")
 KNOWN = frozenset({"native", "fake"})
 HANDLE = re.compile(r"^(native|fake)-[0-9]+$")
+WORKER_LIMIT = 3  # 임시. 측정 뒤 고친다.
 
 
 class OrchestratorError(Exception):
@@ -90,6 +97,110 @@ def _read(root: Path, handle: str) -> dict[str, str]:
     return blank(**{key: str(loaded.get(key, "")) for key in FIELDS})
 
 
+def paths_overlap(left: str, right: str) -> bool:
+    left_path = PurePosixPath(_plan_path(left))
+    right_path = PurePosixPath(_plan_path(right))
+    if str(left_path) in ("", ".") or str(right_path) in ("", "."):
+        return False
+    if left_path == right_path:
+        return True
+    try:
+        left_path.relative_to(right_path)
+        return True
+    except ValueError:
+        pass
+    try:
+        right_path.relative_to(left_path)
+        return True
+    except ValueError:
+        return False
+
+
+def _unit_files(files: str) -> tuple[str, ...]:
+    return tuple(piece for piece in files.replace(",", " ").split() if piece)
+
+
+def admit_work(
+    root: Path,
+    work_id: str,
+    running: int = 0,
+    selected: list[str] | None = None,
+    finished: list[str] | None = None,
+) -> dict[str, str]:
+    folder = root / ".team" / "sessions" / work_id
+    task_path = folder / "task.md"
+    if not task_path.is_file():
+        return blank(ok="아니오", state="거부", reason=f"task.md가 없다: {work_id}")
+    log_path = folder / "log.md"
+    log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
+    if not log_has_go(log_text):
+        return blank(ok="아니오", state="거부", reason="go 없는 작업이다")
+    units = read_plan_units(task_path.read_text(encoding="utf-8"))
+    if not units:
+        return blank(ok="아니오", state="거부", reason="계획 단위가 없다")
+    by_name = {item[0]: item for item in units}
+    names = list(selected) if selected else [item[0] for item in units]
+    for name in names:
+        if name not in by_name:
+            return blank(ok="아니오", state="거부", reason=f"계획에 없는 단위다: {name}")
+    file_sets = {name: _unit_files(by_name[name][2]) for name in names}
+    for index, left in enumerate(names):
+        for right in names[index + 1 :]:
+            for left_file in file_sets[left]:
+                for right_file in file_sets[right]:
+                    if paths_overlap(left_file, right_file):
+                        shown = _plan_path(left_file)
+                        return blank(
+                            ok="아니오",
+                            state="거부",
+                            reason=f"건드릴 파일이 겹친다: {shown}",
+                        )
+    done = set(finished or [])
+    for name in names:
+        dep = by_name[name][1].strip()
+        if not dep or dep == "없음":
+            continue
+        if dep in names or dep not in done:
+            return blank(
+                ok="아니오",
+                state="거부",
+                reason=f"앞 단위 결과가 입력이다: {dep}",
+            )
+    if running + len(names) > WORKER_LIMIT:
+        return blank(
+            ok="아니오",
+            state="거부",
+            reason=f"동시 워커 상한 {WORKER_LIMIT}을 넘는다",
+        )
+    return blank(ok="예", state="허용", line=" ".join(names))
+
+
+def start_work(
+    root: Path,
+    work_id: str,
+    running: int = 0,
+    selected: list[str] | None = None,
+    finished: list[str] | None = None,
+) -> dict[str, str]:
+    decision = admit_work(
+        root,
+        work_id,
+        running=running,
+        selected=selected,
+        finished=finished,
+    )
+    if decision["ok"] != "예":
+        return decision
+    handles: list[str] = []
+    for name in decision["line"].split():
+        record = start(root, name)
+        if record["ok"] != "예":
+            return record
+        handles.append(record["handle"])
+    decision["handle"] = ",".join(handles)
+    return decision
+
+
 def start(root: Path, unit: str) -> dict[str, str]:
     if not unit.strip():
         return blank(ok="아니오", state="거부", reason="단위가 없다")
@@ -123,7 +234,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", default="")
     sub = parser.add_subparsers(dest="command", required=True)
     start_cmd = sub.add_parser("start", help="단위를 받아 핸들을 만든다.")
-    start_cmd.add_argument("--unit", required=True)
+    start_cmd.add_argument("--unit", default="")
+    start_cmd.add_argument("--work", default="")
+    start_cmd.add_argument("--running", type=int, default=0)
+    admit_cmd = sub.add_parser("admit", help="시작 전 검사를 읽고 허용 또는 거부를 낸다.")
+    admit_cmd.add_argument("--work", required=True)
+    admit_cmd.add_argument("--running", type=int, default=0)
+    admit_cmd.add_argument("--unit", action="append", default=[])
+    admit_cmd.add_argument("--finished", action="append", default=[])
     poll_cmd = sub.add_parser("poll", help="핸들의 상태를 읽는다.")
     poll_cmd.add_argument("--handle", required=True)
     collect_cmd = sub.add_parser("collect", help="결과 한 줄을 읽는다.")
@@ -131,8 +249,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = notes_root(args.root or None)
     try:
-        if args.command == "start":
+        if args.command == "start" and args.work:
+            record = start_work(root, args.work, running=args.running)
+        elif args.command == "start":
             record = start(root, args.unit)
+        elif args.command == "admit":
+            record = admit_work(
+                root,
+                args.work,
+                running=args.running,
+                selected=args.unit or None,
+                finished=args.finished or None,
+            )
         elif args.command == "poll":
             record = poll(root, args.handle)
         else:
