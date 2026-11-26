@@ -60,7 +60,13 @@ codex plugin list --json
 
 텔레메트리: 사용자 `~/.codex/config.toml`에 `analytics.enabled = false`를 두면 내장 Statsig 지표가 꺼진다. 명시적 OTLP까지 끄려면 `otel.metrics_exporter = "none"`을 둔다. 프로젝트 로컬 설정은 텔레메트리 키를 무시한다 (https://developers.openai.com/codex/config-reference). superpowers 쪽은 `SUPERPOWERS_DISABLE_TELEMETRY=1`이다.
 
-작업 노트는 훅 없이 이어간다. Codex CLI `0.172.0`은 세션을 열 때 저장소 루트의 `AGENTS.md`를 읽는다. `.codex/hooks.json`은 두지 않는다.
+세션 시작은 저장소 안의 SessionStart 훅이 `python3 scripts/team-session.py start-context`를 실행한다. Claude Code는 `.claude/settings.json`, Codex는 `.codex/hooks.json`이다. matcher는 `startup|resume|clear|compact`이고 타임아웃은 임시 10초다. 명령이 실패해도 `|| true` 때문에 셸은 종료 0이고 세션 시작은 막히지 않는다. 사용자 홈과 전역 설정은 바꾸지 않는다. 결정은 `docs/adr/0006-session-start-hooks.md`다. 이 결정은 #3의 '훅 파일을 추가하지 않는다'를 뒤집는다.
+
+Codex는 `.codex/hooks.json`이 바뀔 때마다 신뢰 검토가 필요하다. 절차는 이렇다.
+
+1. `git diff`로 `.codex/hooks.json`만 본다.
+2. 명령이 이 저장소의 `scripts/team-session.py start-context`인지, 홈 경로나 다른 네트워크 명령이 없는지 확인한다.
+3. 그 다음에 Codex의 프로젝트 신뢰 질문에 동의한다. 동의하기 전에는 바뀐 훅을 실행하지 않는다.
 
 ```bash
 codex

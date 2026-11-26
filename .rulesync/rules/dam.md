@@ -37,4 +37,4 @@ globs: ["**/*"]
 - Codex가 남기는 state.md와 log.md는 Claude Code와 같은 칸이다 (https://github.com/rimoir/dam/issues/3).
 - Codex를 열면 `.team/board.md`와 열린 작업의 state.md를 읽고, 첫 답에 작업 이름과 state.md의 다음 할 일을 말한다. 재개 줄의 도구는 `Codex`다.
 - 그 다음 Claude Code로 다시 열어도 같다. 첫 답은 작업 이름과 state.md의 다음 할 일이다. 재개 줄의 도구는 `Claude Code`다.
-- 이 이어받기는 README의 Codex 절만으로 된다. 훅 파일을 추가하지 않는다 (https://github.com/rimoir/dam/issues/3).
+- 이 이어받기는 README의 Codex 절과 저장소 안 SessionStart 훅으로 된다. 훅은 `.claude/settings.json`과 `.codex/hooks.json`만 두고, 실패해도 세션 시작을 막지 않는다. Codex에서 훅 파일이 바뀌면 README의 신뢰 검토를 거친다 (https://github.com/rimoir/dam/issues/42).
