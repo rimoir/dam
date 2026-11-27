@@ -31,6 +31,7 @@ from verify_report import (  # noqa: E402
     dump_snapshot,
     expect_matches,
     load_snapshot,
+    run_isolated_readonly,
     snapshot_digest,
     snapshot_outside,
     take_snapshot,
@@ -319,8 +320,10 @@ def main(argv: list[str] | None = None) -> int:
     readonly = sub.add_parser("verify-readonly", help="작업 폴더 스냅샷을 찍거나 비교한다.")
     readonly.add_argument("--begin", action="store_true")
     readonly.add_argument("--end", action="store_true")
+    readonly.add_argument("--isolated", action="store_true")
     readonly.add_argument("--snapshot", default="")
     readonly.add_argument("--expect", default="")
+    readonly.add_argument("--command", dest="verify_command", default="")
     plan = sub.add_parser("plan-check", help="기능 계획의 네 칸을 읽기만 한다.")
     plan.add_argument("work_id")
     resume = sub.add_parser("resume", help="이어받기 모드로 바꾸거나 이전 모드로 돌린다.")
@@ -366,6 +369,13 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(word + "\n")
             return 0 if word == "PASS" else 1
         elif args.command == "verify-readonly":
+            if args.isolated:
+                if args.begin or args.end or not args.verify_command.strip() or not args.snapshot:
+                    sys.stdout.write("실패\n")
+                    return 1
+                word = run_isolated_readonly(root, args.verify_command, Path(args.snapshot))
+                sys.stdout.write(word + "\n")
+                return 0 if word == "깨끗" else 1
             if args.begin == args.end or not args.snapshot:
                 sys.stdout.write("실패\n")
                 return 1

@@ -1399,6 +1399,13 @@ class VerifyReadonlyTest(unittest.TestCase):
         )
         self.assertEqual(done.stdout, "실패\n", done.stderr)
         self.assertNotEqual(done.returncode, 0)
+        self.assertNotIn(b"hack", snap.read_bytes())
+
+    def test_isolated_unchanged_tree_is_clean(self) -> None:
+        snap = Path(self.tmp.name + "-snap.json")
+        done = self._run("--isolated", "--snapshot", str(snap), "--command", "true")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "깨끗\n")
 
     def test_isolated_visible_snapshot_is_not_clean(self) -> None:
         snap = self.root / "visible.json"

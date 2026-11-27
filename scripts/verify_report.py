@@ -7,7 +7,11 @@ import hashlib
 import json
 import os
 import re
+import shlex
+import shutil
 import stat
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -109,6 +113,74 @@ def digest_ok(expect: str) -> bool:
 
 def expect_matches(data: bytes, expect: str) -> bool:
     return snapshot_digest(data) == expect
+
+
+def isolation_available() -> bool:
+    if shutil.which("unshare") is None or shutil.which("timeout") is None:
+        return False
+    if shutil.which("setpriv") is None:
+        return False
+    probe = subprocess.run(
+        ["unshare", "-rmn", "true"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return probe.returncode == 0
+
+
+def run_isolated_readonly(root: Path, command: str, snapshot: Path) -> str:
+    text = command.strip()
+    if not text or "\x00" in text:
+        return "실패"
+    if not snapshot_outside(root, snapshot):
+        return "실패"
+    if not isolation_available():
+        return "실패"
+    from orchestrator import _locked_command, materialize_snapshot, snapshot_tree
+
+    copy = Path(tempfile.mkdtemp(prefix="verify-copy-"))
+    try:
+        problem = materialize_snapshot(root, snapshot_tree(root), copy)
+        if problem or not snapshot_outside(copy, snapshot):
+            return "실패"
+        try:
+            data = dump_snapshot(take_snapshot(copy)).encode("utf-8")
+        except OSError:
+            return "실패"
+        snapshot.write_bytes(data)
+        digest = snapshot_digest(data)
+        probe = "test -e " + shlex.quote(str(snapshot)) + " && echo VISIBLE || echo HIDDEN"
+        code, seen, _err = _locked_command(copy, probe)
+        wrapper = copy / "isolate"
+        if wrapper.is_file():
+            wrapper.unlink()
+        if code < 0 or "VISIBLE" in (seen or ""):
+            return "실패"
+        code, _out, _err = _locked_command(copy, text)
+        if wrapper.is_file():
+            wrapper.unlink()
+        if code < 0:
+            return "실패"
+        try:
+            raw = snapshot.read_bytes()
+        except OSError:
+            return "실패"
+        if not expect_matches(raw, digest):
+            return "실패"
+        try:
+            loaded = load_snapshot(raw.decode("utf-8"))
+        except UnicodeError:
+            return "실패"
+        if loaded is None:
+            return "실패"
+        try:
+            after = take_snapshot(copy)
+        except OSError:
+            return "실패"
+        return compare_stamps(loaded, after)
+    finally:
+        shutil.rmtree(copy, ignore_errors=True)
 
 
 def snapshot_outside(root: Path, snapshot: Path) -> bool:
