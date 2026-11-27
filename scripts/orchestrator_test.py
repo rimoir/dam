@@ -2474,5 +2474,222 @@ class NoteLineReasonTest(unittest.TestCase):
         self._assert_lines(done, ".team/sessions/780124/log.md", before, after)
 
 
+class DisposableCheckTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.pids: list[int] = []
+
+    def tearDown(self) -> None:
+        for pid in self.pids:
+            if pid <= 1 or pid == os.getpid():
+                continue
+            try:
+                os.killpg(pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        parent = self.root.resolve().parent
+        for name in ("780131", "780132", "780133", "780134", "780135", "780136"):
+            shutil.rmtree(parent / f"dam-{name}", ignore_errors=True)
+        self.tmp.cleanup()
+
+    def _git(self, dest: Path, script: str, body: str) -> None:
+        (dest / "scripts").mkdir(parents=True, exist_ok=True)
+        (dest / "scripts" / script).write_text(body, encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=dest, check=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=dest, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=dest, check=True)
+        subprocess.run(["git", "add", "."], cwd=dest, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "처음"], cwd=dest, check=True)
+
+    def _run(
+        self, work_id: str, check: str, script: str, body: str, worker: str
+    ) -> dict[str, str]:
+        write_work(
+            self.root,
+            work_id,
+            f"- 검증용 | 없음 | scripts/{script} | {check}",
+            GO,
+        )
+        (self.root / ".team" / "sessions" / work_id / "state.md").write_text(
+            "# 상태\n\n## 다음 할 일\n\n결과를 적었다\n",
+            encoding="utf-8",
+        )
+        dest = place_worktree(self.root, work_id)
+        self._git(dest, script, body)
+        bindir = self.root / "bin"
+        bindir.mkdir(exist_ok=True)
+        claude = bindir / "claude"
+        claude.write_text(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$ORCH_ARGV\"\n" + worker + "\nexit 0\n",
+            encoding="utf-8",
+        )
+        claude.chmod(0o755)
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["ORCH_ARGV"] = str(self.root / "argv.txt")
+        env["ORCH_CLAUDE"] = str(claude)
+        env["GH_TOKEN"] = "orch-secret-token"
+        env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        started = subprocess.run(
+            ["python3", str(SCRIPT), "start", "--unit", "검증용"],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+        handle = parse_record(started.stdout)["handle"]
+        stored = json.loads(
+            (self.root / ".team" / "orchestrator" / f"{handle}.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        pid = int(stored.get("pid") or "0")
+        if pid:
+            self.pids.append(pid)
+        seen = ""
+        for _ in range(40):
+            polled = subprocess.run(
+                ["python3", str(SCRIPT), "poll", "--handle", handle],
+                cwd=self.root,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            seen = parse_record(polled.stdout)["state"]
+            if seen == "끝":
+                break
+            time.sleep(0.05)
+        self.assertEqual(seen, "끝")
+        before = subprocess.run(
+            ["git", "-C", str(self.root), "status", "--porcelain"],
+            text=True,
+            capture_output=True,
+        )
+        collected = subprocess.run(
+            ["python3", str(SCRIPT), "collect", "--handle", handle],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        after = subprocess.run(
+            ["git", "-C", str(self.root), "status", "--porcelain"],
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(collected.returncode, 0, collected.stderr)
+        done = parse_record(collected.stdout)
+        done["repo_status"] = before.stdout
+        done["repo_after"] = after.stdout
+        done["argv"] = (self.root / "argv.txt").read_text(encoding="utf-8")
+        done["dest"] = str(dest)
+        return done
+
+    def _result_writer(self, work_id: str, extra: str = "") -> str:
+        return (
+            f"mkdir -p .team/sessions/{work_id}\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 준비' "
+            f"> .team/sessions/{work_id}/result.md\n"
+            + extra
+        )
+
+    def test_passing_check_is_shown(self) -> None:
+        done = self._run(
+            "780131",
+            "python3 scripts/check.py",
+            "check.py",
+            "raise SystemExit(0)\n",
+            self._result_writer("780131"),
+        )
+        self.assertEqual(done["state"], "검증 통과")
+        self.assertNotIn("검증:", done["argv"])
+        self.assertNotIn("orch-secret-token", done["reason"])
+
+    def test_failing_check_is_shown(self) -> None:
+        done = self._run(
+            "780132",
+            "python3 scripts/check.py",
+            "check.py",
+            "print('FAIL_TAIL')\nraise SystemExit(1)\n",
+            self._result_writer("780132"),
+        )
+        self.assertEqual(done["state"], "검증 실패")
+        self.assertIn("FAIL_TAIL", done["reason"])
+
+    def test_network_attempt_is_blocked(self) -> None:
+        done = self._run(
+            "780133",
+            "python3 scripts/check.py",
+            "check.py",
+            "import urllib.request\n"
+            "try:\n"
+            "    urllib.request.urlopen('http://127.0.0.1:9', timeout=2)\n"
+            "    print('NET_OK')\n"
+            "except Exception as exc:\n"
+            "    print('NET_FAIL', type(exc).__name__)\n"
+            "raise SystemExit(1)\n",
+            self._result_writer("780133"),
+        )
+        self.assertEqual(done["state"], "검증 실패")
+        self.assertIn("NET_FAIL", done["reason"])
+        self.assertNotIn("NET_OK", done["reason"])
+
+    def test_token_and_home_are_hidden(self) -> None:
+        done = self._run(
+            "780134",
+            "python3 scripts/check.py",
+            "check.py",
+            "import os, pathlib\n"
+            "token = os.environ.get('GH_TOKEN', '')\n"
+            "print('TOKEN', 'ABSENT' if token == '' else 'SEEN')\n"
+            "home = os.environ.get('HOME', '')\n"
+            "print('HOME', home)\n"
+            "print('CFG', pathlib.Path(home, '.gitconfig').exists() if home else True)\n"
+            "print('SSH', pathlib.Path(home, '.ssh').exists() if home else True)\n"
+            "raise SystemExit(1)\n",
+            self._result_writer("780134"),
+        )
+        self.assertEqual(done["state"], "검증 실패")
+        self.assertIn("TOKEN ABSENT", done["reason"])
+        self.assertIn("CFG False", done["reason"])
+        self.assertNotIn("orch-secret-token", done["reason"])
+        self.assertNotIn("/home/ubuntu", done["reason"])
+
+    def test_worker_check_rewrite_is_ignored(self) -> None:
+        evil = self.root / "scripts"
+        done = self._run(
+            "780135",
+            "python3 scripts/check.py",
+            "check.py",
+            "raise SystemExit(0)\n",
+            self._result_writer("780135")
+            + "python3 -c \"from pathlib import Path; "
+            + "p = Path('"
+            + str(self.root)
+            + "') / '.team/sessions/780135/task.md'; "
+            + "t = p.read_text(encoding='utf-8'); "
+            + "p.write_text(t.replace('python3 scripts/check.py', "
+            + "'python3 scripts/evil.py'), encoding='utf-8')\"\n",
+        )
+        self.assertEqual(done["state"], "검증 통과")
+        self.assertNotIn("evil.py", done["reason"])
+        self.assertFalse((Path(done["dest"]) / "evil-ran").exists())
+
+    def test_problem_does_not_run_the_check(self) -> None:
+        done = self._run(
+            "780136",
+            "python3 scripts/check.py",
+            "check.py",
+            "open('ran-marker','w').write('x')\n",
+            self._result_writer("780136") + "printf '%s\\n' extra > extra.txt\n",
+        )
+        self.assertEqual(done["state"], "문제")
+        self.assertFalse((Path(done["dest"]) / "ran-marker").exists())
+        self.assertEqual(done["repo_status"], done["repo_after"])
+
+
 if __name__ == "__main__":
     unittest.main()
