@@ -286,6 +286,10 @@ class ClaudeLaunchTest(unittest.TestCase):
             GO,
         )
         dest = place_worktree(self.root, "780079")
+        (dest / "scripts").mkdir()
+        (dest / "scripts" / "orchestrator_test.py").write_text(
+            "raise SystemExit(0)\n", encoding="utf-8"
+        )
         try:
             self._assert_reaped(dest)
         finally:
@@ -321,15 +325,11 @@ class ClaudeLaunchTest(unittest.TestCase):
         for piece in ("git push", "gh pr create", "gh pr comment", "gh pr merge"):
             self.assertNotIn(piece, argv)
         self.assertNotIn("gh ", argv)
-        for piece in (
-            "core.hooksPath=/dev/null",
-            "status)",
-            "diff)",
-            "add .)",
-            "commit)",
-            "python3 scripts/orchestrator_test.py)",
-        ):
-            self.assertIn(piece, argv)
+        allowed = argv.split("--allowedTools", 1)[-1]
+        for piece in ("core.hooksPath=/dev/null", "status)", "diff)"):
+            self.assertIn(piece, allowed)
+        self.assertNotIn("commit", allowed)
+        self.assertNotIn("python3", allowed)
         self.assertFalse((self.root / "codex-ran.txt").exists())
         self.assertTrue((dest / "result.md").is_file())
         self.assertFalse((self.root / "result.md").exists())
@@ -789,13 +789,14 @@ class ToolScopeTest(unittest.TestCase):
             argv = (self.root / "argv.txt").read_text(encoding="utf-8")
         finally:
             shutil.rmtree(dest, ignore_errors=True)
-        self.assertNotIn("scripts/*", argv)
-        self.assertNotIn("team-session.py", argv)
-        self.assertNotIn("git status *", argv)
-        self.assertNotIn("git add *", argv)
-        self.assertIn("Bash(python3 scripts/orchestrator_test.py)", argv)
-        self.assertNotIn("Bash(python3 scripts/orchestrator_test.py *)", argv)
-        self.assertIn("core.hooksPath=/dev/null", argv)
+        allowed = argv.split("--allowedTools", 1)[-1]
+        self.assertNotIn("scripts/*", allowed)
+        self.assertNotIn("team-session.py", allowed)
+        self.assertNotIn("python3", allowed)
+        self.assertNotIn("commit", allowed)
+        self.assertNotIn("git status *", allowed)
+        self.assertNotIn("git add *", allowed)
+        self.assertIn("core.hooksPath=/dev/null", allowed)
 
     def test_argv_has_no_code_run_or_commit(self) -> None:
         write_work(
@@ -935,6 +936,89 @@ class CheckOutsideTest(unittest.TestCase):
         self.assertEqual(done["state"], "문제")
         self.assertEqual(done["line"], "")
         self.assertIn("ok_test.py", done["reason"])
+
+    def test_passed_check_is_committed_outside_the_worker(self) -> None:
+        (self.root / "bin" / "claude").write_text(
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$*\" > \"$ORCH_ARGV\"\n"
+            "printf '%s\\n' '워커가 씀' > worker.txt\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 끝' > result.md\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        write_work(
+            self.root,
+            "780098",
+            "- 검증용 | 없음 | scripts/ok_test.py | python3 scripts/ok_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, "780098")
+        (dest / "scripts").mkdir()
+        (dest / "scripts" / "ok_test.py").write_text("print('원래')\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=dest, check=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=dest, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=dest, check=True)
+        subprocess.run(["git", "add", "scripts/ok_test.py"], cwd=dest, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "처음"], cwd=dest, check=True)
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["ORCH_ARGV"] = str(self.root / "argv.txt")
+        env["ORCH_CLAUDE"] = str(self.root / "bin" / "claude")
+        env["PATH"] = str(self.root / "bin") + os.pathsep + env.get("PATH", "")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        try:
+            started = subprocess.run(
+                ["python3", str(SCRIPT), "start", "--unit", "검증용"],
+                cwd=self.root,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+            handle = parse_record(started.stdout)["handle"]
+            seen = ""
+            for _ in range(40):
+                polled = subprocess.run(
+                    ["python3", str(SCRIPT), "poll", "--handle", handle],
+                    cwd=self.root,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                )
+                seen = parse_record(polled.stdout)["state"]
+                if seen == "끝":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(seen, "끝")
+            collected = subprocess.run(
+                ["python3", str(SCRIPT), "collect", "--handle", handle],
+                cwd=self.root,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(collected.returncode, 0, collected.stderr)
+            message = subprocess.run(
+                ["git", "log", "-1", "--format=%s"],
+                cwd=dest,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            names = subprocess.run(
+                ["git", "ls-tree", "-r", "--name-only", "HEAD"],
+                cwd=dest,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+        self.assertEqual(message, "워커 결과를 담는다")
+        self.assertIn("worker.txt", names)
+        allowed = (self.root / "argv.txt").read_text(encoding="utf-8").split("--allowedTools", 1)[-1]
+        self.assertNotIn("python3", allowed)
+        self.assertNotIn("commit", allowed)
 
 
 class GateTest(unittest.TestCase):

@@ -8,9 +8,11 @@ Codex는 미검증이라 띄우지 않는다. 다섯 칸은 그대로다.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -38,12 +40,10 @@ HANDLE = re.compile(r"^(native|fake)-[0-9]+$")
 WORKER_LIMIT = 3  # 임시. 측정 뒤 고친다.
 STALL_LIMIT_SECONDS = 900  # 임시. 측정 뒤 고친다.
 MAX_TURNS = 40  # 임시. 측정 뒤 고친다.
-# 훅을 끄고 인자 와일드카드는 없다. 검증 명령만 그 뒤에 붙인다. ADR 0009.
+# 조회와 차이만. 실행과 커밋은 거둘 때 오케스트레이터가 한다. ADR 0009.
 _LOCAL_TOOLS = (
     "Bash(git -c core.hooksPath=/dev/null status)",
     "Bash(git -c core.hooksPath=/dev/null diff)",
-    "Bash(git -c core.hooksPath=/dev/null add .)",
-    "Bash(git -c core.hooksPath=/dev/null commit)",
 )
 _REMOTE_MARK = (
     "team-session.py",
@@ -417,8 +417,59 @@ def unit_check(root: Path, unit: str) -> str:
     return ""
 
 
-def allowed_tools(command: str) -> str:
-    return " ".join((*_LOCAL_TOOLS, f"Bash({command.strip()})"))
+def allowed_tools() -> str:
+    return " ".join(_LOCAL_TOOLS)
+
+
+def check_file_paths(command: str) -> tuple[str, ...]:
+    found: list[str] = []
+    for token in command.split():
+        candidates: list[str] = []
+        if "/" in token or token.endswith(".py"):
+            candidates.append(token)
+        if (
+            "." in token
+            and "/" not in token
+            and not token.startswith("-")
+            and token != "python3"
+        ):
+            candidates.append(token.replace(".", "/") + ".py")
+        for cand in candidates:
+            if cand not in found:
+                found.append(cand)
+    return tuple(found)
+
+
+def check_digests(cwd: Path, command: str) -> dict[str, str]:
+    digests: dict[str, str] = {}
+    base = cwd.resolve()
+    for rel in check_file_paths(command):
+        path = (cwd / rel).resolve()
+        try:
+            shown = str(path.relative_to(base))
+        except ValueError:
+            continue
+        if path.is_file():
+            digests[shown] = hashlib.sha256(path.read_bytes()).hexdigest()
+        else:
+            digests[shown] = ""
+    return digests
+
+
+def changed_check_files(cwd: Path, saved: dict[str, str]) -> tuple[str, ...]:
+    base = cwd.resolve()
+    changed: list[str] = []
+    for rel, digest in saved.items():
+        path = (cwd / rel).resolve()
+        try:
+            path.relative_to(base)
+        except ValueError:
+            changed.append(rel)
+            continue
+        now = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else ""
+        if now != digest:
+            changed.append(rel)
+    return tuple(changed)
 
 
 def _launch_claude(
@@ -666,8 +717,13 @@ def start(root: Path, unit: str) -> dict[str, str]:
             ensure_ascii=False,
         )
     if name == "native":
+        extra["check"] = check
+        extra["checks"] = json.dumps(
+            check_digests(cwd, check),
+            ensure_ascii=False,
+        )
         launched = _launch_claude(
-            root, record["handle"], unit, cwd, allowed_tools(check)
+            root, record["handle"], unit, cwd, allowed_tools()
         )
         if isinstance(launched, str):
             return blank(ok="아니오", state="거부", reason=launched)
@@ -717,6 +773,45 @@ def collect(root: Path, handle: str) -> dict[str, str]:
         _write(root, loaded)
         return record
     cwd = Path(loaded.get("cwd") or root)
+    try:
+        saved_checks = json.loads(loaded.get("checks") or "{}")
+    except json.JSONDecodeError:
+        saved_checks = {}
+    if isinstance(saved_checks, dict) and saved_checks:
+        moved = changed_check_files(cwd, {str(k): str(v) for k, v in saved_checks.items()})
+        if moved:
+            record = blank(
+                ok="예",
+                handle=handle,
+                state="문제",
+                line="",
+                reason="검증 파일이 바뀌었다: " + " ".join(moved),
+            )
+            loaded.update(record)
+            _write(root, loaded)
+            return record
+    check_command = loaded.get("check", "").strip()
+    check_code = 0
+    if check_command:
+        ran = subprocess.run(
+            shlex.split(check_command),
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        check_code = ran.returncode
+        if check_code != 0:
+            record = blank(
+                ok="예",
+                handle=handle,
+                state="실패",
+                line="",
+                reason="검증이 실패했다",
+            )
+            loaded.update(record)
+            _write(root, loaded)
+            return record
     owner = loaded.get("work", "")
     candidates = [cwd / "result.md"]
     if owner:
@@ -732,6 +827,8 @@ def collect(root: Path, handle: str) -> dict[str, str]:
         code = int(loaded.get("exit", "0") or "0")
     except ValueError:
         code = 1
+    if check_code != 0:
+        code = check_code
     state_text = ""
     if owner:
         for folder in (
@@ -743,15 +840,54 @@ def collect(root: Path, handle: str) -> dict[str, str]:
                 state_text = state_path.read_text(encoding="utf-8")
             scrub_notes(folder)
     kind = judge(code, line, next_action_updated(state_text))
+    if check_command and check_code == 0 and kind != "문제":
+        sealed = _seal_worktree(cwd)
+        if sealed:
+            kind = "문제"
+            line = ""
+            reason_seal = sealed
+        else:
+            reason_seal = ""
+    else:
+        reason_seal = ""
     first_path = _store(root) / f"{handle}.first"
     if first_path.is_file():
         stamp = first_path.read_text(encoding="utf-8").strip()
         if stamp:
             loaded["first_event"] = stamp
-    record = blank(ok="예", handle=handle, state=kind, line=line)
+    record = blank(ok="예", handle=handle, state=kind, line=line, reason=reason_seal)
     loaded.update(record)
     _write(root, loaded)
     return record
+
+
+def _seal_worktree(cwd: Path) -> str:
+    inside = _git(cwd, ["rev-parse", "--is-inside-work-tree"])
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        return ""
+    add = _git(cwd, ["-c", "core.hooksPath=/dev/null", "add", "."])
+    if add.returncode != 0:
+        return "담지 못했다"
+    quiet = _git(cwd, ["diff", "--cached", "--quiet"])
+    if quiet.returncode == 0:
+        return ""
+    commit = _git(
+        cwd,
+        [
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "user.email=worker@localhost",
+            "-c",
+            "user.name=worker",
+            "commit",
+            "-m",
+            "워커 결과를 담는다",
+        ],
+    )
+    if commit.returncode != 0:
+        return "커밋하지 못했다"
+    return ""
 
 
 def _git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
