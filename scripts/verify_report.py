@@ -13,6 +13,7 @@ from pathlib import Path
 
 _KINDS = frozenset({"PASS", "ISSUES", "BLOCKED"})
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,18 @@ def changed_stamp_paths(before: tuple[FileStamp, ...], after: tuple[FileStamp, .
     new = {item.path: item for item in after}
     names = sorted(set(old) | set(new))
     return tuple(name for name in names if old.get(name) != new.get(name))
+
+
+def snapshot_digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def digest_ok(expect: str) -> bool:
+    return _DIGEST.fullmatch(expect) is not None
+
+
+def expect_matches(data: bytes, expect: str) -> bool:
+    return snapshot_digest(data) == expect
 
 
 def snapshot_outside(root: Path, snapshot: Path) -> bool:

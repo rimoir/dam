@@ -27,8 +27,11 @@ from issue_tracker import (  # noqa: E402
 from verify_report import (  # noqa: E402
     changed_stamp_paths,
     compare_stamps,
+    digest_ok,
     dump_snapshot,
+    expect_matches,
     load_snapshot,
+    snapshot_digest,
     snapshot_outside,
     take_snapshot,
     verdict_word,
@@ -317,6 +320,7 @@ def main(argv: list[str] | None = None) -> int:
     readonly.add_argument("--begin", action="store_true")
     readonly.add_argument("--end", action="store_true")
     readonly.add_argument("--snapshot", default="")
+    readonly.add_argument("--expect", default="")
     plan = sub.add_parser("plan-check", help="기능 계획의 네 칸을 읽기만 한다.")
     plan.add_argument("work_id")
     resume = sub.add_parser("resume", help="이어받기 모드로 바꾸거나 이전 모드로 돌린다.")
@@ -371,19 +375,30 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             if args.begin:
                 try:
-                    text = dump_snapshot(take_snapshot(root))
+                    data = dump_snapshot(take_snapshot(root)).encode("utf-8")
                 except OSError:
                     sys.stdout.write("실패\n")
                     return 1
-                snap.write_text(text, encoding="utf-8")
-                sys.stdout.write("찍음\n")
+                snap.write_bytes(data)
+                sys.stdout.write(snapshot_digest(data) + "\n")
                 return 0
+            if not digest_ok(args.expect.strip()):
+                sys.stdout.write("실패\n")
+                return 1
             if not snap.is_file():
                 sys.stdout.write("실패\n")
                 return 1
             try:
-                raw = snap.read_text(encoding="utf-8")
-            except (OSError, UnicodeError):
+                raw_bytes = snap.read_bytes()
+            except OSError:
+                sys.stdout.write("실패\n")
+                return 1
+            if not expect_matches(raw_bytes, args.expect.strip()):
+                sys.stdout.write("실패\n")
+                return 1
+            try:
+                raw = raw_bytes.decode("utf-8")
+            except UnicodeError:
                 sys.stdout.write("실패\n")
                 return 1
             before = load_snapshot(raw)

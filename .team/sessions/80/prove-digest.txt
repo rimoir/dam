@@ -1,0 +1,12 @@
+===== 재실행 =====
+DIGEST:6c0bc023b7bf84e861f1c2257c87fcee10df36778bc397bc5d2b4edcedd62493
+AGAIN:c35c39c17d06b0113081a155ba9d4bf382ae00c302eddc6a8f9706cea93a85bb
+실패
+EXIT:1
+===== 덮어쓰기 =====
+DIGEST:c35c39c17d06b0113081a155ba9d4bf382ae00c302eddc6a8f9706cea93a85bb
+실패
+EXIT:1
+===== 그대로 =====
+깨끗
+EXIT:0
