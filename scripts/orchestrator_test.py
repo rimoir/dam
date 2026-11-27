@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1157,6 +1158,272 @@ class TreePremiseTest(unittest.TestCase):
             self.assertEqual(done["state"], "문제")
         finally:
             shutil.rmtree(dest, ignore_errors=True)
+
+
+class SubtractPremiseTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.pids: list[int] = []
+        parent = self.root.resolve().parent
+        for name in ("780111", "780112", "780113", "780114", "780115"):
+            leftover = parent / f"dam-{name}"
+            if leftover.exists():
+                shutil.rmtree(leftover, ignore_errors=True)
+
+    def tearDown(self) -> None:
+        for pid in self.pids:
+            if pid <= 1 or pid == os.getpid():
+                continue
+            try:
+                os.killpg(pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        parent = self.root.resolve().parent
+        for name in ("780111", "780112", "780113", "780114", "780115"):
+            shutil.rmtree(parent / f"dam-{name}", ignore_errors=True)
+        self.tmp.cleanup()
+
+    def _claude(self, body: str) -> None:
+        bindir = self.root / "bin"
+        bindir.mkdir(exist_ok=True)
+        script = bindir / "claude"
+        script.write_text("#!/bin/sh\n" + body + "\nexit 0\n", encoding="utf-8")
+        script.chmod(0o755)
+
+    def _env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["ORCH_CLAUDE"] = str(self.root / "bin" / "claude")
+        env["PATH"] = str(self.root / "bin") + os.pathsep + env.get("PATH", "")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        return env
+
+    def _collect(self, work_id: str) -> tuple[dict[str, str], int]:
+        env = self._env()
+        started = subprocess.run(
+            ["python3", str(SCRIPT), "start", "--unit", "검증용"],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+        handle = parse_record(started.stdout)["handle"]
+        stored = json.loads(
+            (self.root / ".team" / "orchestrator" / f"{handle}.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        pid = int(stored.get("pid") or "0")
+        if pid:
+            self.pids.append(pid)
+        seen = ""
+        for _ in range(40):
+            polled = subprocess.run(
+                ["python3", str(SCRIPT), "poll", "--handle", handle],
+                cwd=self.root,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            seen = parse_record(polled.stdout)["state"]
+            if seen == "끝":
+                break
+            time.sleep(0.05)
+        self.assertEqual(seen, "끝")
+        collected = subprocess.run(
+            ["python3", str(SCRIPT), "collect", "--handle", handle],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        return parse_record(collected.stdout), pid
+
+    def test_common_gitdir_filter_does_not_run(self) -> None:
+        work_id = "780111"
+        write_work(
+            self.root,
+            work_id,
+            "- 검증용 | 없음 | scripts/ok_test.py | python3 scripts/ok_test.py",
+            GO,
+        )
+        main = self.root / "repo"
+        main.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=main, check=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=main, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=main, check=True)
+        (main / "scripts").mkdir()
+        (main / "scripts" / "ok_test.py").write_text("print('ok')\n", encoding="utf-8")
+        (main / ".gitattributes").write_text("* filter=mark\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=main, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "처음"], cwd=main, check=True)
+        dest = self.root.resolve().parent / f"dam-{work_id}"
+        added = subprocess.run(
+            ["git", "worktree", "add", "-b", f"worker/{work_id}", str(dest), "HEAD"],
+            cwd=main,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(added.returncode, 0, added.stderr)
+        marker = dest / "ran-marker"
+        self._claude(
+            "gitdir=$(sed -n 's/^gitdir: //p' .git)\n"
+            'case "$gitdir" in /*) ;; *) gitdir="$(pwd)/$gitdir" ;; esac\n'
+            'common=$(cat "$gitdir/commondir")\n'
+            'case "$common" in /*) ;; *) common="$gitdir/$common" ;; esac\n'
+            'git config --file "$common/config" filter.mark.clean "touch $(pwd)/ran-marker"\n'
+            f"mkdir -p .team/sessions/{work_id}\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 읽기' "
+            f"> .team/sessions/{work_id}/result.md"
+        )
+        done, _pid = self._collect(work_id)
+        self.assertFalse(marker.exists())
+        self.assertEqual(done["state"], "문제")
+        self.assertIn("common/config", done["reason"])
+
+    def test_check_file_changed_after_compare_does_not_run(self) -> None:
+        work_id = "780114"
+        write_work(
+            self.root,
+            work_id,
+            "- 검증용 | 없음 | scripts/ok_test.py | python3 scripts/ok_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, work_id)
+        (dest / "scripts").mkdir()
+        (dest / "scripts" / "ok_test.py").write_text(
+            "import os\n"
+            "import signal\n"
+            "def _stop(*_args):\n"
+            "    raise SystemExit(0)\n"
+            "signal.signal(signal.SIGALRM, _stop)\n"
+            "signal.alarm(5)\n"
+            "fd = os.open('gate.fifo', os.O_RDONLY)\n"
+            "os.read(fd, 1)\n"
+            "os.close(fd)\n"
+            "text = open('scripts/ok_test.py', encoding='utf-8').read()\n"
+            "if 'gate.fifo' not in text:\n"
+            "    exec(text)\n",
+            encoding="utf-8",
+        )
+        os.mkfifo(dest / "gate.fifo")
+        swap = self.root / "swap.py"
+        swap.write_text(
+            "import os\n"
+            "import signal\n"
+            "def _stop(*_args):\n"
+            "    raise SystemExit(0)\n"
+            "signal.signal(signal.SIGALRM, _stop)\n"
+            "signal.alarm(20)\n"
+            "fd = os.open('gate.fifo', os.O_WRONLY)\n"
+            "with open('scripts/ok_test.py', 'w', encoding='utf-8') as handle:\n"
+            "    handle.write(\"open('ran-marker','w').write('race')\\n\")\n"
+            "os.write(fd, b'x')\n"
+            "os.close(fd)\n",
+            encoding="utf-8",
+        )
+        self._claude(
+            f"mkdir -p .team/sessions/{work_id}\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 읽기' "
+            f"> .team/sessions/{work_id}/result.md\n"
+            'printf \'%s\\n\' 0 > "$ORCH_EXIT"\n'
+            f"python3 {swap}"
+        )
+        done, _pid = self._collect(work_id)
+        self.assertFalse((dest / "ran-marker").exists())
+        self.assertEqual(done["state"], "대기")
+        self.assertEqual(done["line"], "")
+
+    def test_new_directory_symlink_does_not_run(self) -> None:
+        work_id = "780112"
+        write_work(
+            self.root,
+            work_id,
+            "- 검증용 | 없음 | scripts/ok_test.py | python3 scripts/ok_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, work_id)
+        (dest / "scripts").mkdir()
+        (dest / "scripts" / "ok_test.py").write_text(
+            "import os\n"
+            "from pathlib import Path\n"
+            "link = Path('linked')\n"
+            "if link.is_symlink():\n"
+            "    target = Path(os.readlink(link))\n"
+            "    if not target.is_absolute():\n"
+            "        target = Path.cwd() / target\n"
+            "    for child in sorted(target.glob('*.py')):\n"
+            "        exec(child.read_text(), {})\n",
+            encoding="utf-8",
+        )
+        outside = self.root / "evil"
+        outside.mkdir()
+        (outside / "evil.py").write_text(
+            "open('ran-marker','w').write('dir')\n", encoding="utf-8"
+        )
+        self._claude(
+            f"ln -s {outside} linked\n"
+            f"mkdir -p .team/sessions/{work_id}\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 읽기' "
+            f"> .team/sessions/{work_id}/result.md"
+        )
+        done, _pid = self._collect(work_id)
+        self.assertFalse((dest / "ran-marker").exists())
+        self.assertEqual(done["state"], "문제")
+        self.assertIn("linked", done["reason"])
+
+    def test_result_symlink_is_not_followed(self) -> None:
+        work_id = "780113"
+        write_work(
+            self.root,
+            work_id,
+            "- 검증용 | 없음 | scripts/ok_test.py | python3 scripts/ok_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, work_id)
+        (dest / "scripts").mkdir()
+        (dest / "scripts" / "ok_test.py").write_text("print('ok')\n", encoding="utf-8")
+        token = "ghp_" + ("A" * 36)
+        secret = self.root / "token.txt"
+        original = f"# 결과\n\n## 결과\n\nPASS {token}\n"
+        secret.write_text(original, encoding="utf-8")
+        self._claude(
+            f"mkdir -p .team/sessions/{work_id}\n"
+            f"ln -s {secret} .team/sessions/{work_id}/result.md"
+        )
+        done, _pid = self._collect(work_id)
+        self.assertEqual(secret.read_text(encoding="utf-8"), original)
+        self.assertNotIn("***", secret.read_text(encoding="utf-8"))
+        self.assertEqual(done["state"], "문제")
+        self.assertEqual(done["line"], "")
+        self.assertIn("result.md", done["reason"])
+
+    def test_live_worker_is_left_waiting(self) -> None:
+        work_id = "780115"
+        write_work(
+            self.root,
+            work_id,
+            "- 검증용 | 없음 | scripts/ok_test.py | python3 scripts/ok_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, work_id)
+        (dest / "scripts").mkdir()
+        (dest / "scripts" / "ok_test.py").write_text(
+            "open('ran-marker','w').write('alive')\n", encoding="utf-8"
+        )
+        self._claude(
+            f"mkdir -p .team/sessions/{work_id}\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 읽기' "
+            f"> .team/sessions/{work_id}/result.md\n"
+            'printf \'%s\\n\' 0 > "$ORCH_EXIT"\n'
+            "sleep 30"
+        )
+        done, _pid = self._collect(work_id)
+        self.assertFalse((dest / "ran-marker").exists())
+        self.assertEqual(done["state"], "대기")
+        self.assertEqual(done["line"], "")
 
 
 class GateTest(unittest.TestCase):
