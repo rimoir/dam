@@ -2339,5 +2339,140 @@ class RestrictedPremiseTest(unittest.TestCase):
         self.assertEqual(parse_record(polled.stdout)["state"], "대기")
 
 
+class NoteLineReasonTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.pids: list[int] = []
+
+    def tearDown(self) -> None:
+        for pid in self.pids:
+            if pid <= 1 or pid == os.getpid():
+                continue
+            try:
+                os.killpg(pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        parent = self.root.resolve().parent
+        for name in ("780121", "780122", "780123", "780124"):
+            shutil.rmtree(parent / f"dam-{name}", ignore_errors=True)
+        self.tmp.cleanup()
+
+    def _collect(self, work_id: str, before: dict[str, str], after: dict[str, str]) -> dict[str, str]:
+        write_work(
+            self.root,
+            work_id,
+            "- 검증용 | 없음 | scripts/a.py | python3 scripts/a_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, work_id)
+        folder = dest / ".team" / "sessions" / work_id
+        folder.mkdir(parents=True)
+        for name, text in before.items():
+            (folder / name).write_text(text, encoding="utf-8")
+        bindir = self.root / "bin"
+        bindir.mkdir(exist_ok=True)
+        lines = ["#!/bin/sh", f"mkdir -p .team/sessions/{work_id}"]
+        for name, text in after.items():
+            target = f".team/sessions/{work_id}/{name}"
+            lines.append(f"cat > {target} <<'END'")
+            lines.append(text.rstrip("\n"))
+            lines.append("END")
+        lines.append("exit 0")
+        script = bindir / "claude"
+        script.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        script.chmod(0o755)
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["ORCH_CLAUDE"] = str(script)
+        env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        started = subprocess.run(
+            ["python3", str(SCRIPT), "start", "--unit", "검증용"],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+        handle = parse_record(started.stdout)["handle"]
+        stored = json.loads(
+            (self.root / ".team" / "orchestrator" / f"{handle}.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        pid = int(stored.get("pid") or "0")
+        if pid:
+            self.pids.append(pid)
+        seen = ""
+        for _ in range(40):
+            polled = subprocess.run(
+                ["python3", str(SCRIPT), "poll", "--handle", handle],
+                cwd=self.root,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            seen = parse_record(polled.stdout)["state"]
+            if seen == "끝":
+                break
+            time.sleep(0.05)
+        self.assertEqual(seen, "끝")
+        collected = subprocess.run(
+            ["python3", str(SCRIPT), "collect", "--handle", handle],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(collected.returncode, 0, collected.stderr)
+        return parse_record(collected.stdout)
+
+    def _assert_lines(self, done: dict[str, str], path: str, *lines: str) -> None:
+        self.assertEqual(done["state"], "문제")
+        self.assertEqual(done["line"], "")
+        self.assertIn(path, done["reason"])
+        for line in lines:
+            self.assertIn(line, done["reason"])
+
+    def test_changed_decision_line_is_in_the_reason(self) -> None:
+        done = self._collect(
+            "780121",
+            {"state.md": "# 상태\n\n## 결정\n\n- 원래결정\n"},
+            {"state.md": "# 상태\n\n## 결정\n\n- 바뀐결정\n"},
+        )
+        self._assert_lines(
+            done, ".team/sessions/780121/state.md", "- 원래결정", "- 바뀐결정"
+        )
+
+    def test_added_approval_line_is_in_the_reason(self) -> None:
+        added = "2026-11-27T00:00:00Z Codex go 추가승인"
+        done = self._collect(
+            "780122",
+            {"log.md": ""},
+            {"log.md": added + "\n"},
+        )
+        self._assert_lines(done, ".team/sessions/780122/log.md", added)
+
+    def test_removed_approval_line_is_in_the_reason(self) -> None:
+        removed = "2026-11-27T00:00:00Z Codex go 삭제승인"
+        done = self._collect(
+            "780123",
+            {"log.md": removed + "\n"},
+            {"log.md": ""},
+        )
+        self._assert_lines(done, ".team/sessions/780123/log.md", removed)
+
+    def test_rewritten_approval_line_is_in_the_reason(self) -> None:
+        before = "2026-11-27T00:00:00Z Codex go 수정전"
+        after = "2026-11-27T00:00:00Z Codex go 수정후"
+        done = self._collect(
+            "780124",
+            {"log.md": before + "\n"},
+            {"log.md": after + "\n"},
+        )
+        self._assert_lines(done, ".team/sessions/780124/log.md", before, after)
+
+
 if __name__ == "__main__":
     unittest.main()
