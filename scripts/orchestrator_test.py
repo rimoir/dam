@@ -835,6 +835,81 @@ class ToolScopeTest(unittest.TestCase):
         self.assertIn("검증 명령이 없다", parsed["reason"])
 
 
+class CheckOutsideTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        bindir = self.root / "bin"
+        bindir.mkdir()
+        (bindir / "claude").write_text(
+            "#!/bin/sh\n"
+            "mkdir -p scripts\n"
+            "printf '%s\\n' 'print(\"바뀐 호출\")' > scripts/ok_test.py\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 위조' > result.md\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        (bindir / "claude").chmod(0o755)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_changed_check_file_is_not_accepted(self) -> None:
+        write_work(
+            self.root,
+            "780096",
+            "- 검증용 | 없음 | scripts/ok_test.py | python3 scripts/ok_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, "780096")
+        (dest / "scripts").mkdir()
+        (dest / "scripts" / "ok_test.py").write_text(
+            "print('원래')\n", encoding="utf-8"
+        )
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["ORCH_CLAUDE"] = str(self.root / "bin" / "claude")
+        env["PATH"] = str(self.root / "bin") + os.pathsep + env.get("PATH", "")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        try:
+            started = subprocess.run(
+                ["python3", str(SCRIPT), "start", "--unit", "검증용"],
+                cwd=self.root,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+            handle = parse_record(started.stdout)["handle"]
+            seen = ""
+            for _ in range(40):
+                polled = subprocess.run(
+                    ["python3", str(SCRIPT), "poll", "--handle", handle],
+                    cwd=self.root,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                )
+                seen = parse_record(polled.stdout)["state"]
+                if seen == "끝":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(seen, "끝")
+            collected = subprocess.run(
+                ["python3", str(SCRIPT), "collect", "--handle", handle],
+                cwd=self.root,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+        done = parse_record(collected.stdout)
+        self.assertEqual(done["state"], "문제")
+        self.assertEqual(done["line"], "")
+        self.assertIn("ok_test.py", done["reason"])
+
+
 class GateTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
