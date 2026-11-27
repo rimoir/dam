@@ -1347,6 +1347,31 @@ class VerifyReadonlyTest(unittest.TestCase):
         self.assertEqual(done.stdout, "실패\n", done.stderr)
         self.assertIn("scripts/alias.py", done.stderr)
 
+    def test_second_begin_after_edit_is_not_clean(self) -> None:
+        snap = self._snap()
+        begin = self._run("--begin", "--snapshot", str(snap))
+        self.assertEqual(begin.returncode, 0, begin.stderr)
+        (self.root / "scripts" / "ok.py").write_text("x = 9\n", encoding="utf-8")
+        again = self._run("--begin", "--snapshot", str(snap))
+        self.assertEqual(again.returncode, 0, again.stderr)
+        end = self._run("--end", "--snapshot", str(snap))
+        self.assertEqual(end.stdout, "실패\n", end.stderr)
+        self.assertNotEqual(end.returncode, 0)
+
+    def test_overwritten_snapshot_after_edit_is_not_clean(self) -> None:
+        snap = self._snap()
+        other = Path(self.tmp.name + "-other.json")
+        begin = self._run("--begin", "--snapshot", str(snap))
+        self.assertEqual(begin.returncode, 0, begin.stderr)
+        (self.root / "scripts" / "ok.py").write_text("x = 9\n", encoding="utf-8")
+        fresh = self._run("--begin", "--snapshot", str(other))
+        self.assertEqual(fresh.returncode, 0, fresh.stderr)
+        snap.write_bytes(other.read_bytes())
+        end = self._run("--end", "--snapshot", str(snap))
+        self.assertEqual(end.stdout, "실패\n", end.stderr)
+        self.assertNotEqual(end.returncode, 0)
+        other.unlink(missing_ok=True)
+
     def test_snapshot_inside_work_is_not_written(self) -> None:
         inside = self.root / "snap.json"
         done = self._run("--begin", "--snapshot", str(inside))
