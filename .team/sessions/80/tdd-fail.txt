@@ -1,3 +1,4 @@
+실패 검사 커밋 a8c0b52
 verify-judge와 verify-readonly 명령이 없다.
 오류: invalid choice: 'verify-judge'
 오류: invalid choice: 'verify-readonly'

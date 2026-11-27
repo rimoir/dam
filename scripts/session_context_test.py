@@ -1264,7 +1264,8 @@ class VerifyReadonlyTest(unittest.TestCase):
         self.assertEqual(done.stdout, "깨끗\n")
 
     def test_code_change_during_verification_fails(self) -> None:
-        before = self.root / "before.txt"
+        before = self.root / ".team" / "before.txt"
+        before.parent.mkdir()
         before.write_text("", encoding="utf-8")
         start = self._run("--before", str(before))
         self.assertEqual(start.stdout, "깨끗\n", start.stderr)
@@ -1281,7 +1282,7 @@ class VerifyReadonlyTest(unittest.TestCase):
         done = self._run()
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout, "깨끗\n")
-        before = self.root / "before.txt"
+        before = self.root / ".team" / "before.txt"
         before.write_text("scripts/ok.py\n", encoding="utf-8")
         stale = self._run("--before", str(before))
         self.assertNotEqual(stale.returncode, 0)

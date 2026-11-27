@@ -24,6 +24,11 @@ from issue_tracker import (  # noqa: E402
     load_tracker,
     redact,
 )
+from verify_report import (  # noqa: E402
+    judge_readonly,
+    paths_from_text,
+    verdict_word,
+)
 from session_context import (  # noqa: E402
     current_branch,
     limit_errors,
@@ -301,6 +306,11 @@ def main(argv: list[str] | None = None) -> int:
     mode = sub.add_parser("mode", help="열린 작업 상태 파일 첫 줄의 모드만 바꾼다.")
     mode.add_argument("name", nargs="+")
     sub.add_parser("code-clean", help="코드 파일이 바뀌지 않았는지 읽기만 한다.")
+    judge = sub.add_parser("verify-judge", help="검증 결과 문자열을 판정한다.")
+    judge.add_argument("--head", required=True)
+    judge.add_argument("--text", required=True)
+    readonly = sub.add_parser("verify-readonly", help="시작과 끝의 코드 경로가 비었는지 본다.")
+    readonly.add_argument("--before", default="")
     plan = sub.add_parser("plan-check", help="기능 계획의 네 칸을 읽기만 한다.")
     plan.add_argument("work_id")
     resume = sub.add_parser("resume", help="이어받기 모드로 바꾸거나 이전 모드로 돌린다.")
@@ -341,6 +351,24 @@ def main(argv: list[str] | None = None) -> int:
             if dirty:
                 print("\n".join(dirty), file=sys.stderr)
                 return 1
+        elif args.command == "verify-judge":
+            word = verdict_word(args.text, args.head)
+            sys.stdout.write(word + "\n")
+            return 0 if word == "PASS" else 1
+        elif args.command == "verify-readonly":
+            if args.before:
+                before = Path(args.before)
+                if not before.is_file():
+                    raise SystemExit("시작 기록이 없다")
+                start = paths_from_text(before.read_text(encoding="utf-8"))
+            else:
+                start = ()
+            end = tuple(code_dirty_paths(root))
+            word = judge_readonly(start, end)
+            sys.stdout.write(word + "\n")
+            if word == "실패" and end:
+                print("\n".join(end), file=sys.stderr)
+            return 0 if word == "깨끗" else 1
         elif args.command == "plan-check":
             errors, notice = plan_check(root, args.work_id)
             if notice:
