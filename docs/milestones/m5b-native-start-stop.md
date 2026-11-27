@@ -26,8 +26,8 @@ Codex가 작업 폴더 커밋을 막는지는 아직 모른다. 샌드박스를 
 5. 워커마다 횟수 상한은 40이다. 임시이고, 시작 시간을 잰 뒤에 고친다.
 6. `--permission-mode acceptEdits`, `--permission-prompts none`, `--output-format stream-json`, `--verbose`를 쓴다. 첫 이벤트까지 걸린 시간은 공개 다섯 칸 밖에 둔다. 결과 줄은 result.md에서 거둔다.
 7. 워커에게 Bash와 MCP를 넘기지 않는다. `--tools`는 Read, Edit, Write이고, `--disallowedTools`는 Bash다. `--restricted --strict-mcp-config`를 넣고 `--mcp-config`는 넣지 않는다. push, PR, 병합은 데브가 한다. 새 토큰은 없다.
-8. 워커는 새 세션으로 뜬다. 끝과 대기는 한 판단이다. 종료 파일이 있고 그룹이 비었으면 끝이다. 그룹에 프로세스가 있으면 대기이고 결과 줄을 읽지 않는다. 멈출 때는 셸에서 `kill -TERM -<pid>`로 그룹을 끝낸다. 워커 폴더에서는 아무것도 실행하지 않고 쓰지도 않는다.
-9. `성공`일 때만 결과 줄을 노트 루트 `.team/sessions/<작업ID>/result.md`에 넣고, `git -c core.hooksPath=/dev/null -c core.fsmonitor=false add -- .team/sessions/<작업ID>/result.md` 뒤에 커밋한다. 그룹이 비면 `git worktree remove --force ../dam-<작업ID>`로 워커 폴더를 지운다.
+8. 워커는 새 세션으로 뜬다. 끝과 대기는 한 판단이다. 종료 파일이 있고 그룹이 비었으면 끝이다. 그룹에 프로세스가 있으면 대기이고 결과 줄을 읽지 않는다. 멈출 때는 bash 내장 `kill -TERM -<pid>`로 그룹을 끝낸다. `/bin/kill`은 그룹을 못 끝낼 수 있다. 워커 폴더에서는 아무것도 실행하지 않고 쓰지도 않는다.
+9. `성공`일 때만 결과 줄을 노트 루트 `.team/sessions/<작업ID>/result.md`에 넣고, `git -c core.hooksPath=/dev/null -c core.fsmonitor=false add -- .team/sessions/<작업ID>/result.md` 뒤에 같은 `-c`를 붙인 `git commit`으로 담는다. add의 clean filter는 그 저장소에 이미 있는 설정이다. 그룹이 비면 `git worktree remove --force ../dam-<작업ID>`로 워커 폴더를 지운다.
 
 ## 하지 않은 것
 
