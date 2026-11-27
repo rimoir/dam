@@ -318,6 +318,11 @@ class ClaudeLaunchTest(unittest.TestCase):
         self.assertIn("acceptEdits", argv)
         self.assertNotIn("bypassPermissions", argv)
         self.assertNotIn("dangerously-skip-permissions", argv)
+        for piece in ("git push", "gh pr create", "gh pr comment", "gh pr merge"):
+            self.assertNotIn(piece, argv)
+        self.assertNotIn("gh ", argv)
+        for piece in ("git status", "git diff", "git add", "git commit", "python3 scripts"):
+            self.assertIn(piece, argv)
         self.assertFalse((self.root / "codex-ran.txt").exists())
         self.assertTrue((dest / "result.md").is_file())
         self.assertFalse((self.root / "result.md").exists())
