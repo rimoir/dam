@@ -8,6 +8,7 @@ Codex는 미검증이라 띄우지 않는다. 다섯 칸은 그대로다.
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
 import json
 import os
@@ -43,6 +44,9 @@ MAX_TURNS = 40  # 임시. 측정 뒤 고친다.
 # Bash는 주지 않는다. 읽기와 쓰기는 Read, Edit, Write. ADR 0009.
 _WORKER_TOOLS = "Read,Edit,Write"
 _NOTE_SUFFIXES = {".md", ".txt", ".json"}
+_NOTE_NAMES = ("state.md", "log.md")
+_REASON_LINE_LIMIT = 200
+_REASON_LINE_COUNT = 8
 
 
 class OrchestratorError(Exception):
@@ -824,6 +828,8 @@ def start(root: Path, unit: str) -> dict[str, str]:
         )
     if name == "native":
         extra["tree"] = json.dumps(snapshot_tree(cwd), ensure_ascii=False)
+        if owner and owner != "*":
+            _save_note_originals(root, record["handle"], cwd, owner)
         launched = _launch_claude(root, record["handle"], unit, cwd)
         if isinstance(launched, str):
             return blank(ok="아니오", state="거부", reason=launched)
@@ -885,6 +891,97 @@ def _state_text(root: Path, cwd: Path, owner: str) -> str:
     return ""
 
 
+def _note_dir(root: Path, handle: str) -> Path:
+    return _store(root) / f"{handle}.notes"
+
+
+def _save_note_originals(root: Path, handle: str, cwd: Path, owner: str) -> None:
+    if not owner or owner == "*":
+        return
+    for name in _NOTE_NAMES:
+        src = cwd / ".team" / "sessions" / owner / name
+        text = ""
+        try:
+            info = src.lstat()
+        except OSError:
+            info = None
+        if info is not None and stat.S_ISREG(info.st_mode):
+            text = _read_regular(src) or ""
+        _write_regular(_note_dir(root, handle) / name, text)
+
+
+def _escape_reason_line(text: str) -> str:
+    out: list[str] = []
+    for ch in text:
+        code = ord(ch)
+        if ch == "\\":
+            out.append("\\\\")
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\t":
+            out.append("\\t")
+        elif code < 32 or code == 127:
+            out.append(f"\\x{code:02x}")
+        else:
+            out.append(ch)
+    rendered = "".join(out)
+    if len(rendered) > _REASON_LINE_LIMIT:
+        return rendered[:_REASON_LINE_LIMIT]
+    return rendered
+
+
+def _changed_lines(before: str, after: str) -> list[str]:
+    found: list[str] = []
+    for raw in difflib.ndiff(before.splitlines(), after.splitlines()):
+        if not raw.startswith(("+ ", "- ")):
+            continue
+        line = raw[2:]
+        if not line.strip():
+            continue
+        found.append(line)
+    return found
+
+
+def _read_worker_note(path: Path) -> str | None:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return ""
+    except OSError:
+        return None
+    if not stat.S_ISREG(info.st_mode):
+        return None
+    return _read_regular(path)
+
+
+def _change_reason(
+    root: Path, handle: str, cwd: Path, owner: str, moved: tuple[str, ...]
+) -> str:
+    notes = {}
+    if owner and owner != "*":
+        notes = {
+            f".team/sessions/{owner}/{name}": name for name in _NOTE_NAMES
+        }
+    pieces = list(moved)
+    budget = _REASON_LINE_COUNT
+    saved = _note_dir(root, handle)
+    for rel, name in notes.items():
+        if rel not in moved or budget <= 0:
+            continue
+        before = _read_regular(saved / name) or ""
+        after = _read_worker_note(cwd / rel)
+        if after is None:
+            continue
+        for line in _changed_lines(before, after):
+            if budget <= 0:
+                break
+            pieces.append(_escape_reason_line(line))
+            budget -= 1
+    return " ".join(pieces)
+
+
 def _problem(root: Path, loaded: dict[str, str], handle: str, reason: str) -> dict[str, str]:
     record = blank(ok="예", handle=handle, state="문제", line="", reason=reason)
     loaded.update(record)
@@ -921,7 +1018,12 @@ def collect(root: Path, handle: str) -> dict[str, str]:
         )
         if moved:
             _restore_guard(loaded, root)
-            return _problem(root, loaded, handle, " ".join(moved))
+            return _problem(
+                root,
+                loaded,
+                handle,
+                _change_reason(root, handle, cwd, owner, moved),
+            )
     result_path = (
         cwd / ".team" / "sessions" / owner / "result.md" if owner else cwd / "result.md"
     )
