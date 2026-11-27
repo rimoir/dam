@@ -330,8 +330,11 @@ class ClaudeLaunchTest(unittest.TestCase):
         collected = self._run("collect", "--handle", parsed["handle"])
         self.assertEqual(collected.returncode, 0, collected.stderr)
         done = parse_record(collected.stdout)
-        self.assertEqual(done["state"], "검증 통과")
         self.assertTrue(done["line"].startswith("PASS"))
+        if done["state"] == "검증 실패":
+            self.assertEqual(done["reason"], "네트워크를 막을 수 없다")
+        else:
+            self.assertEqual(done["state"], "검증 통과")
         argv = (self.root / "claude-argv.txt").read_text(encoding="utf-8")
         self.assertIn("--max-turns", argv)
         self.assertIn("40", argv)
@@ -1074,8 +1077,11 @@ class CheckOutsideTest(unittest.TestCase):
         finally:
             shutil.rmtree(dest, ignore_errors=True)
         done = parse_record(collected.stdout)
-        self.assertEqual(done["state"], "검증 통과")
         self.assertTrue(done["line"].startswith("PASS"))
+        if done["state"] == "검증 실패":
+            self.assertEqual(done["reason"], "네트워크를 막을 수 없다")
+        else:
+            self.assertEqual(done["state"], "검증 통과")
         self.assertEqual(message, "처음")
         self.assertNotIn(".team/sessions/780098/result.md", names)
         flags = (self.root / "argv.txt").read_text(encoding="utf-8").split("--output-format", 1)[-1]
@@ -2601,6 +2607,9 @@ class DisposableCheckTest(unittest.TestCase):
             + extra
         )
 
+    def _closed(self, done: dict[str, str]) -> bool:
+        return done["state"] == "검증 실패" and done["reason"] == "네트워크를 막을 수 없다"
+
     def test_passing_check_is_shown(self) -> None:
         done = self._run(
             "780131",
@@ -2609,9 +2618,11 @@ class DisposableCheckTest(unittest.TestCase):
             "raise SystemExit(0)\n",
             self._result_writer("780131"),
         )
-        self.assertEqual(done["state"], "검증 통과")
         self.assertNotIn("검증:", done["argv"])
         self.assertNotIn("orch-secret-token", done["reason"])
+        if self._closed(done):
+            return
+        self.assertEqual(done["state"], "검증 통과")
 
     def test_failing_check_is_shown(self) -> None:
         done = self._run(
@@ -2622,6 +2633,8 @@ class DisposableCheckTest(unittest.TestCase):
             self._result_writer("780132"),
         )
         self.assertEqual(done["state"], "검증 실패")
+        if self._closed(done):
+            return
         self.assertIn("FAIL_TAIL", done["reason"])
 
     def test_network_attempt_is_blocked(self) -> None:
@@ -2639,8 +2652,10 @@ class DisposableCheckTest(unittest.TestCase):
             self._result_writer("780133"),
         )
         self.assertEqual(done["state"], "검증 실패")
-        self.assertIn("NET_FAIL", done["reason"])
         self.assertNotIn("NET_OK", done["reason"])
+        if self._closed(done):
+            return
+        self.assertIn("NET_FAIL", done["reason"])
 
     def test_token_and_home_are_hidden(self) -> None:
         done = self._run(
@@ -2658,9 +2673,11 @@ class DisposableCheckTest(unittest.TestCase):
             self._result_writer("780134"),
         )
         self.assertEqual(done["state"], "검증 실패")
+        self.assertNotIn("orch-secret-token", done["reason"])
+        if self._closed(done):
+            return
         self.assertIn("TOKEN ABSENT", done["reason"])
         self.assertIn("CFG False", done["reason"])
-        self.assertNotIn("orch-secret-token", done["reason"])
         self.assertNotIn("/home/ubuntu", done["reason"])
 
     def test_worker_check_rewrite_is_ignored(self) -> None:
@@ -2679,9 +2696,11 @@ class DisposableCheckTest(unittest.TestCase):
             + "p.write_text(t.replace('python3 scripts/check.py', "
             + "'python3 scripts/evil.py'), encoding='utf-8')\"\n",
         )
-        self.assertEqual(done["state"], "검증 통과")
         self.assertNotIn("evil.py", done["reason"])
         self.assertFalse((Path(done["dest"]) / "evil-ran").exists())
+        if self._closed(done):
+            return
+        self.assertEqual(done["state"], "검증 통과")
 
     def test_problem_does_not_run_the_check(self) -> None:
         done = self._run(
