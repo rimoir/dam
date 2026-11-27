@@ -1288,6 +1288,41 @@ class VerifyReadonlyTest(unittest.TestCase):
         self.assertNotEqual(stale.returncode, 0)
         self.assertEqual(stale.stdout, "실패\n")
 
+    def test_reverted_edit_is_not_clean(self) -> None:
+        before = self.root / ".team" / "before.txt"
+        before.parent.mkdir(exist_ok=True)
+        before.write_text("", encoding="utf-8")
+        path = self.root / "scripts" / "ok.py"
+        original = path.read_text(encoding="utf-8")
+        path.write_text("x = 2\n", encoding="utf-8")
+        path.write_text(original, encoding="utf-8")
+        done = self._run("--before", str(before))
+        self.assertEqual(done.stdout, "실패\n", done.stderr)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("scripts/ok.py", done.stderr)
+
+    def test_ignored_untracked_file_is_not_clean(self) -> None:
+        ignore = self.root / ".gitignore"
+        ignore.write_text("ignored.py\n", encoding="utf-8")
+        subprocess.run(["git", "add", ".gitignore"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "ignore"],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+        )
+        (self.root / "ignored.py").write_text("hidden\n", encoding="utf-8")
+        done = self._run()
+        self.assertEqual(done.stdout, "실패\n", done.stderr)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("ignored.py", done.stderr)
+
+    def test_missing_snapshot_is_not_clean(self) -> None:
+        missing = self.root.parent / (self.root.name + "-missing.json")
+        done = self._run("--before", str(missing))
+        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(done.stdout, "실패\n", done.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

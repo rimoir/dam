@@ -4,7 +4,7 @@
 
 ## 지금 상태
 
-verify-judge는 PASS, ISSUES, BLOCKED, 실패 중 하나를 낸다. PASS만 종료 0이다. verify-readonly는 시작과 끝의 코드 경로가 모두 비어야 깨끗이다. 훅 파일은 그대로다.
+verify-judge는 그대로다. 되돌린 코드와 gitignore된 파일은 아직 깨끗으로 남는다. 그 검사 3개가 실패한다.
 
 ## 결정
 
