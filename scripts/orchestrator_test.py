@@ -1021,6 +1021,129 @@ class CheckOutsideTest(unittest.TestCase):
         self.assertNotIn("commit", allowed)
 
 
+class TreePremiseTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.marker_name = "ran-marker"
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _repo(self, work_id: str, checker: str) -> Path:
+        write_work(
+            self.root,
+            work_id,
+            f"- 검증용 | 없음 | scripts/ok_test.py | python3 scripts/ok_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, work_id)
+        (dest / "scripts").mkdir()
+        (dest / "scripts" / "ok_test.py").write_text(checker, encoding="utf-8")
+        (dest / "scripts" / "orchestrator.py").write_text("print('ok')\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=dest, check=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=dest, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=dest, check=True)
+        subprocess.run(["git", "add", "."], cwd=dest, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "처음"], cwd=dest, check=True)
+        return dest
+
+    def _claude(self, body: str) -> None:
+        bindir = self.root / "bin"
+        bindir.mkdir(exist_ok=True)
+        script = bindir / "claude"
+        script.write_text("#!/bin/sh\n" + body + "\nexit 0\n", encoding="utf-8")
+        script.chmod(0o755)
+
+    def _collect(self, work_id: str) -> tuple[dict[str, str], Path]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["ORCH_CLAUDE"] = str(self.root / "bin" / "claude")
+        env["PATH"] = str(self.root / "bin") + os.pathsep + env.get("PATH", "")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        started = subprocess.run(
+            ["python3", str(SCRIPT), "start", "--unit", "검증용"],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+        handle = parse_record(started.stdout)["handle"]
+        seen = ""
+        for _ in range(40):
+            polled = subprocess.run(
+                ["python3", str(SCRIPT), "poll", "--handle", handle],
+                cwd=self.root,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            seen = parse_record(polled.stdout)["state"]
+            if seen == "끝":
+                break
+            time.sleep(0.05)
+        self.assertEqual(seen, "끝")
+        collected = subprocess.run(
+            ["python3", str(SCRIPT), "collect", "--handle", handle],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        return parse_record(collected.stdout), Path(self.root).resolve().parent / f"dam-{work_id}"
+
+    def test_imported_module_change_does_not_run(self) -> None:
+        dest = self._repo(
+            "780101",
+            "import runpy\nrunpy.run_path('scripts/orchestrator.py')\n",
+        )
+        self._claude(
+            "printf '%s\\n' 'open(\"ran-marker\", \"w\").write(\"import\")' > scripts/orchestrator.py\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 읽기' > result.md"
+        )
+        try:
+            done, folder = self._collect("780101")
+            self.assertFalse((folder / self.marker_name).exists())
+            self.assertEqual(done["state"], "문제")
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+
+    def test_gitdir_fsmonitor_does_not_run(self) -> None:
+        dest = self._repo("780102", "print('ok')\n")
+        marker = dest / self.marker_name
+        self._claude(
+            f"git config --worktree core.fsmonitor 'touch {marker}'\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 읽기' > result.md"
+        )
+        try:
+            done, folder = self._collect("780102")
+            self.assertFalse(marker.exists())
+            self.assertEqual(done["state"], "문제")
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+
+    def test_new_file_does_not_run(self) -> None:
+        dest = self._repo(
+            "780103",
+            "from pathlib import Path\n"
+            "for path in Path('scripts').glob('*.py'):\n"
+            "    if path.name == 'ok_test.py':\n"
+            "        continue\n"
+            "    exec(path.read_text(), {})\n",
+        )
+        self._claude(
+            "printf '%s\\n' 'open(\"ran-marker\", \"w\").write(\"new\")' > scripts/extra.py\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 읽기' > result.md"
+        )
+        try:
+            done, folder = self._collect("780103")
+            self.assertFalse((folder / self.marker_name).exists())
+            self.assertEqual(done["state"], "문제")
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+
+
 class GateTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
