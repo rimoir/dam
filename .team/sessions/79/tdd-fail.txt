@@ -1,3 +1,4 @@
+실패 검사 커밋 cec45b816bb940c43f74a354fec5310919f8f33e
 start-context가 --role 검증을 받지 않는다.
 오류: unrecognized arguments: --role 검증
 VerifyStartTest 8개 중 7개 실패. 역할 없는 --switch 1개는 통과.
