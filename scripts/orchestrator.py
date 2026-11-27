@@ -630,8 +630,8 @@ def _launch_claude(
                 _WORKER_TOOLS,
                 "--disallowedTools",
                 "Bash",
-                "--allowedTools",
-                _WORKER_TOOLS,
+                "--restricted",
+                "--strict-mcp-config",
             ],
             cwd=cwd,
             env=env,
@@ -836,18 +836,31 @@ def start(root: Path, unit: str) -> dict[str, str]:
     return _read(root, record["handle"])
 
 
+def worker_phase(root: Path, loaded: dict[str, str]) -> str:
+    """종료 파일과 세션 그룹으로 진행, 대기, 끝 중 하나만 낸다."""
+    if loaded.get("tool") != "claude":
+        return loaded.get("state", "")
+    handle = loaded.get("handle", "")
+    exit_path = _store(root) / f"{handle}.exit"
+    ended = exit_path.is_file()
+    if _group_alive(loaded.get("pid", "")):
+        return "대기" if ended else "진행"
+    if ended:
+        return "끝"
+    return "진행"
+
+
 def poll(root: Path, handle: str) -> dict[str, str]:
     try:
         loaded = _load(root, handle)
     except OrchestratorError as exc:
         return blank(ok="아니오", state="거부", reason=str(exc))
     if loaded.get("tool") == "claude":
-        exit_path = _store(root) / f"{handle}.exit"
-        if exit_path.is_file():
-            loaded["state"] = "끝"
+        phase = worker_phase(root, loaded)
+        loaded["state"] = phase
+        if phase == "끝":
+            exit_path = _store(root) / f"{handle}.exit"
             loaded["exit"] = exit_path.read_text(encoding="utf-8").strip()
-        else:
-            loaded["state"] = "진행"
         _write(root, loaded)
     return blank(**{key: loaded.get(key, "") for key in FIELDS})
 
@@ -887,8 +900,6 @@ def collect(root: Path, handle: str) -> dict[str, str]:
         loaded = _load(root, handle)
     except OrchestratorError as exc:
         return blank(ok="아니오", state="거부", reason=str(exc))
-    if _group_alive(loaded.get("pid", "")):
-        return blank(ok="예", handle=handle, state="대기", line="", reason="")
     cwd = Path(loaded.get("cwd") or root)
     owner = loaded.get("work", "")
     allowed = f".team/sessions/{owner}/result.md" if owner else ""

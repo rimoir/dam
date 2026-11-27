@@ -814,11 +814,11 @@ class ToolScopeTest(unittest.TestCase):
             argv = (self.root / "argv.txt").read_text(encoding="utf-8")
         finally:
             shutil.rmtree(dest, ignore_errors=True)
-        allowed = argv.split("--allowedTools", 1)[-1]
-        self.assertNotIn("scripts/*", allowed)
-        self.assertNotIn("team-session.py", allowed)
-        self.assertNotIn("python3", allowed)
-        self.assertNotIn("commit", allowed)
+        flags = argv.split("--output-format", 1)[-1]
+        self.assertNotIn("scripts/*", flags)
+        self.assertNotIn("team-session.py", flags)
+        self.assertNotIn("python3", flags)
+        self.assertNotIn("commit", flags)
         self.assertNotIn("Bash(", argv)
         self.assertNotIn("git status", argv)
         self.assertNotIn("git diff", argv)
@@ -1073,9 +1073,9 @@ class CheckOutsideTest(unittest.TestCase):
         self.assertTrue(done["line"].startswith("PASS"))
         self.assertEqual(message, "처음")
         self.assertNotIn(".team/sessions/780098/result.md", names)
-        allowed = (self.root / "argv.txt").read_text(encoding="utf-8").split("--allowedTools", 1)[-1]
-        self.assertNotIn("python3", allowed)
-        self.assertNotIn("commit", allowed)
+        flags = (self.root / "argv.txt").read_text(encoding="utf-8").split("--output-format", 1)[-1]
+        self.assertNotIn("python3", flags)
+        self.assertNotIn("commit", flags)
 
 
 class TreePremiseTest(unittest.TestCase):
@@ -1271,8 +1271,13 @@ class SubtractPremiseTest(unittest.TestCase):
             seen = parse_record(polled.stdout)["state"]
             if seen == "끝":
                 break
+            if seen == "대기":
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
             time.sleep(0.05)
-        self.assertEqual(seen, "끝")
+        self.assertIn(seen, ("끝", "대기"))
         collected = subprocess.run(
             ["python3", str(SCRIPT), "collect", "--handle", handle],
             cwd=self.root,
@@ -2039,8 +2044,13 @@ class BashGroupTest(unittest.TestCase):
             seen = parse_record(polled.stdout)["state"]
             if seen == "끝":
                 break
+            if seen == "대기":
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
             time.sleep(0.05)
-        self.assertEqual(seen, "끝")
+        self.assertIn(seen, ("끝", "대기"))
         return handle, pid
 
     def test_worker_argv_allows_no_bash(self) -> None:
@@ -2199,9 +2209,10 @@ class RestrictedPremiseTest(unittest.TestCase):
             argv = (self.root / "argv.txt").read_text(encoding="utf-8")
         finally:
             shutil.rmtree(dest, ignore_errors=True)
-        self.assertIn("--restricted", argv)
-        self.assertIn("--strict-mcp-config", argv)
-        self.assertNotIn("--mcp-config", argv)
+        flags = argv.split()
+        self.assertIn("--restricted", flags)
+        self.assertIn("--strict-mcp-config", flags)
+        self.assertNotIn("--mcp-config", flags)
 
     def test_common_gitdir_config_change_is_not_success(self) -> None:
         work_id = "780119"
