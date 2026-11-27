@@ -2500,8 +2500,11 @@ class DisposableCheckTest(unittest.TestCase):
             except (ProcessLookupError, PermissionError, OSError):
                 pass
         parent = self.root.resolve().parent
-        for name in ("780131", "780132", "780133", "780134", "780135", "780136"):
+        for name in ("780131", "780132", "780133", "780134", "780135", "780136", "780137", "780138"):
             shutil.rmtree(parent / f"dam-{name}", ignore_errors=True)
+        probe = Path.home() / ".orch-secret-probe"
+        if probe.is_file():
+            probe.unlink()
         self.tmp.cleanup()
 
     def _git(self, dest: Path, script: str, body: str) -> None:
@@ -2514,7 +2517,13 @@ class DisposableCheckTest(unittest.TestCase):
         subprocess.run(["git", "commit", "-q", "-m", "처음"], cwd=dest, check=True)
 
     def _run(
-        self, work_id: str, check: str, script: str, body: str, worker: str
+        self,
+        work_id: str,
+        check: str,
+        script: str,
+        body: str,
+        worker: str,
+        after_git=None,
     ) -> dict[str, str]:
         write_work(
             self.root,
@@ -2528,6 +2537,8 @@ class DisposableCheckTest(unittest.TestCase):
         )
         dest = place_worktree(self.root, work_id)
         self._git(dest, script, body)
+        if after_git is not None:
+            after_git(dest)
         bindir = self.root / "bin"
         bindir.mkdir(exist_ok=True)
         claude = bindir / "claude"
@@ -2713,6 +2724,117 @@ class DisposableCheckTest(unittest.TestCase):
         self.assertEqual(done["state"], "문제")
         self.assertFalse((Path(done["dest"]) / "ran-marker").exists())
         self.assertEqual(done["repo_status"], done["repo_after"])
+
+    def test_command_cannot_reveal_home_or_write_outside(self) -> None:
+        secret = Path.home() / ".orch-secret-probe"
+        secret.write_text("SECRET_HOME\n", encoding="utf-8")
+        leaked = Path.home() / f".orch-escaped-{self.root.name}"
+        marker = Path("/tmp") / f"orch-outside-marker-{self.root.name}"
+        real = str(Path.home())
+        body = (
+            "import os, pathlib, subprocess, urllib.request\n"
+            "print('TOKEN', 'ABSENT' if os.environ.get('GH_TOKEN', '') == '' else 'SEEN')\n"
+            f"home = {real!r}\n"
+            f"leaked = pathlib.Path(home) / {leaked.name!r}\n"
+            f"marker = pathlib.Path({str(marker)!r})\n"
+            "r = subprocess.run(['umount', home], capture_output=True, text=True)\n"
+            "print('UMOUNT', r.returncode)\n"
+            "try:\n"
+            "    print('READ', pathlib.Path(home, '.orch-secret-probe').read_text().strip())\n"
+            "except Exception as exc:\n"
+            "    print('READ_FAIL', type(exc).__name__)\n"
+            "try:\n"
+            "    leaked.write_text('pwned')\n"
+            "    print('WROTE_HOME')\n"
+            "except Exception as exc:\n"
+            "    print('HOME_FAIL', type(exc).__name__)\n"
+            "try:\n"
+            "    marker.write_text('pwned')\n"
+            "    print('WROTE_TMP')\n"
+            "except Exception as exc:\n"
+            "    print('WRITE_FAIL', type(exc).__name__)\n"
+            "r2 = subprocess.run(['mount', '-t', 'tmpfs', 'tmpfs', '/opt'], capture_output=True, text=True)\n"
+            "print('MOUNT', r2.returncode)\n"
+            "try:\n"
+            "    urllib.request.urlopen('http://127.0.0.1:9', timeout=2)\n"
+            "    print('NET_OK')\n"
+            "except Exception as exc:\n"
+            "    print('NET_FAIL', type(exc).__name__)\n"
+            "raise SystemExit(1)\n"
+        )
+        try:
+            done = self._run(
+                "780137",
+                "python3 scripts/check.py",
+                "check.py",
+                body,
+                self._result_writer("780137"),
+            )
+        finally:
+            if leaked.exists():
+                leaked.unlink()
+            if marker.exists():
+                marker.unlink()
+        self.assertFalse(leaked.exists())
+        self.assertFalse(marker.exists())
+        self.assertNotIn("SECRET_HOME", done["reason"])
+        self.assertNotIn("orch-secret-token", done["reason"])
+        if self._closed(done):
+            return
+        self.assertNotIn("UMOUNT 0", done["reason"])
+        self.assertNotIn("MOUNT 0", done["reason"])
+        self.assertIn("READ_FAIL", done["reason"])
+        self.assertIn("TOKEN ABSENT", done["reason"])
+        self.assertIn("NET_FAIL", done["reason"])
+        self.assertNotIn("NET_OK", done["reason"])
+
+    def test_branch_ref_is_not_what_runs(self) -> None:
+        def move_ref(dest: Path) -> None:
+            path = dest / "scripts" / "check.py"
+            original = path.read_text(encoding="utf-8")
+            path.write_text("print('FROM_REF')\nraise SystemExit(1)\n", encoding="utf-8")
+            subprocess.run(["git", "add", "scripts/check.py"], cwd=dest, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "ref"], cwd=dest, check=True)
+            path.write_text(original, encoding="utf-8")
+
+        done = self._run(
+            "780138",
+            "python3 scripts/check.py",
+            "check.py",
+            "print('FROM_WORK')\nraise SystemExit(1)\n",
+            self._result_writer("780138"),
+            after_git=move_ref,
+        )
+        self.assertNotIn("FROM_REF", done["reason"])
+        if self._closed(done):
+            return
+        self.assertIn("FROM_WORK", done["reason"])
+
+    def test_change_after_snapshot_is_not_run(self) -> None:
+        dest = self.root / "repo"
+        dest.mkdir()
+        self._git(dest, "check.py", "print('OLD_BODY')\nraise SystemExit(1)\n")
+        spec = importlib.util.spec_from_file_location("orch_under_test", SCRIPT)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        snap = module.snapshot_tree(dest)
+        (dest / "scripts" / "check.py").write_text(
+            "print('NEW_BODY')\nraise SystemExit(1)\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "add", "scripts/check.py"], cwd=dest, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "new"], cwd=dest, check=True)
+        try:
+            state, reason = module.run_disposable_check(
+                dest, "python3 scripts/check.py", "", snap
+            )
+        except TypeError:
+            state, reason = module.run_disposable_check(
+                dest, "python3 scripts/check.py", ""
+            )
+        self.assertEqual(state, "검증 실패")
+        self.assertNotIn("NEW_BODY", reason)
+        self.assertIn("바뀌었", reason)
 
 
 if __name__ == "__main__":
