@@ -38,11 +38,10 @@ HANDLE = re.compile(r"^(native|fake)-[0-9]+$")
 WORKER_LIMIT = 3  # 임시. 측정 뒤 고친다.
 STALL_LIMIT_SECONDS = 900  # 임시. 측정 뒤 고친다.
 MAX_TURNS = 40  # 임시. 측정 뒤 고친다.
-# ADR 0007 제안의 push, PR, 머지를 넘기는 자리다. 이 문자열이 경계는 아니다.
+# 작업 폴더 안 로컬 작업만. 원격과 GitHub 도구는 없다. ADR 0009.
 ALLOWED_TOOLS = (
     "Bash(git status *) Bash(git diff *) Bash(git add *) Bash(git commit *) "
-    "Bash(git push *) Bash(gh pr create *) Bash(gh pr comment *) "
-    "Bash(gh pr merge *) Bash(python3 scripts/*)"
+    "Bash(python3 scripts/*)"
 )
 _NOTE_SUFFIXES = {".md", ".txt", ".json"}
 
