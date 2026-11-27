@@ -24,6 +24,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from issue_tracker import redact  # noqa: E402
 from session_context import (  # noqa: E402
+    _log_kind,
     _named_section,
     _plan_path,
     log_has_go,
@@ -187,17 +188,167 @@ def worker_cwd(root: Path, unit: str) -> Path | str:
 
 def worker_prompt(root: Path, unit: str) -> str:
     owner = work_owning_unit(root, unit)
-    brief = unit
+    name, dep, files, check = unit, "없음", "", ""
+    work = ""
     if owner and owner != "*":
-        try:
-            brief = worker_brief(root, owner)
-        except OrchestratorError:
-            brief = unit
+        work = owner
+        task = root / ".team" / "sessions" / owner / "task.md"
+        if task.is_file():
+            try:
+                units = read_plan_units(task.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError):
+                units = ()
+            for item in units:
+                if item[0] == unit:
+                    name, dep, files, check = item
+                    break
+    where = f".team/sessions/{work}/result.md" if work else "result.md"
     return (
-        brief
-        + "\n끝이면 result.md의 결과 칸을 PASS, ISSUES, BLOCKED 중 하나로 시작해 채워라.\n"
-        + "push와 PR과 머지는 이 작업 브랜치에서만 한다.\n"
+        f"단위: {name}\n"
+        f"의존: {dep}\n"
+        f"파일: {files}\n"
+        f"검증: {check}\n"
+        f"결과 칸은 {where}의 ## 결과 절에만 쓴다. "
+        "그 절의 첫 줄은 PASS, ISSUES, BLOCKED 중 하나로 시작한다. "
+        "결정 줄과 승인 줄은 바꾸지 않는다.\n"
     )
+
+
+def _text(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return ""
+
+
+def decision_body(text: str) -> str:
+    return _named_section(text, "## 결정")
+
+
+def approval_lines(text: str) -> tuple[str, ...]:
+    found: list[str] = []
+    for raw in text.splitlines():
+        if _log_kind(raw.split()) == "go":
+            found.append(raw.strip())
+    return tuple(found)
+
+
+def changed_note_lines(
+    before_decisions: str,
+    after_decisions: str,
+    before_approvals: tuple[str, ...],
+    after_approvals: tuple[str, ...],
+) -> tuple[str, ...]:
+    before_d = [line.strip() for line in before_decisions.splitlines() if line.strip()]
+    after_d = [line.strip() for line in after_decisions.splitlines() if line.strip()]
+    changed: list[str] = []
+    for line in after_d:
+        if line not in before_d:
+            changed.append(line)
+    for line in before_d:
+        if line not in after_d:
+            changed.append(line)
+    for line in after_approvals:
+        if line not in before_approvals:
+            changed.append(line)
+    for line in before_approvals:
+        if line not in after_approvals:
+            changed.append(line)
+    return tuple(changed)
+
+
+def replace_section(text: str, heading: str, body: str) -> str:
+    lines = text.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        if line.strip() == heading:
+            start = index + 1
+            break
+    body_lines = body.splitlines()
+    if start is None:
+        extra = [heading, *body_lines]
+        if lines and lines[-1] != "":
+            lines.append("")
+        lines.extend(extra)
+    else:
+        end = len(lines)
+        for index in range(start, len(lines)):
+            if lines[index].startswith("## "):
+                end = index
+                break
+        lines = lines[:start] + body_lines + lines[end:]
+    rendered = "\n".join(lines)
+    if text.endswith("\n") or rendered:
+        rendered += "\n"
+    return rendered
+
+
+def restore_approvals(text: str, approvals: tuple[str, ...]) -> str:
+    kept = [raw for raw in text.splitlines() if _log_kind(raw.split()) != "go"]
+    kept.extend(approvals)
+    rendered = "\n".join(kept)
+    if rendered:
+        rendered += "\n"
+    return rendered
+
+
+def _capture_guard(root: Path, cwd: Path, work_id: str) -> dict[str, list[dict[str, object]]]:
+    folders: list[Path] = []
+    seen: set[str] = set()
+    for folder in (
+        root / ".team" / "sessions" / work_id,
+        cwd / ".team" / "sessions" / work_id,
+    ):
+        key = str(folder)
+        if key in seen:
+            continue
+        seen.add(key)
+        folders.append(folder)
+    files: list[dict[str, object]] = []
+    for folder in folders:
+        log = _text(folder / "log.md")
+        files.append(
+            {
+                "dir": str(folder),
+                "decisions": decision_body(_text(folder / "state.md")),
+                "approvals": list(approval_lines(log)),
+            }
+        )
+    return {"files": files}
+
+
+def _restore_guard(loaded: dict[str, str]) -> tuple[str, ...]:
+    raw = loaded.get("guard", "")
+    if not raw:
+        return ()
+    try:
+        guard = json.loads(raw)
+    except json.JSONDecodeError:
+        return ()
+    changed: list[str] = []
+    for item in guard.get("files", []):
+        folder = Path(str(item.get("dir", "")))
+        if not str(folder):
+            continue
+        before_d = str(item.get("decisions", ""))
+        before_a = tuple(str(line) for line in item.get("approvals", []))
+        state_path = folder / "state.md"
+        log_path = folder / "log.md"
+        state = _text(state_path)
+        log = _text(log_path)
+        after_d = decision_body(state)
+        after_a = approval_lines(log)
+        changed.extend(changed_note_lines(before_d, after_d, before_a, after_a))
+        if after_d != before_d:
+            base = state if state_path.is_file() else "# 상태\n\n## 결정\n"
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(replace_section(base, "## 결정", before_d), encoding="utf-8")
+        if after_a != before_a:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text(restore_approvals(log, before_a), encoding="utf-8")
+    return tuple(dict.fromkeys(changed))
 
 
 def _launch_claude(root: Path, handle: str, unit: str, cwd: Path) -> tuple[int, str] | str | None:
@@ -428,6 +579,10 @@ def start(root: Path, unit: str) -> dict[str, str]:
     owner = work_owning_unit(root, unit)
     if owner and owner != "*":
         extra["work"] = owner
+        extra["guard"] = json.dumps(
+            _capture_guard(root, cwd, owner),
+            ensure_ascii=False,
+        )
     if name == "native":
         launched = _launch_claude(root, record["handle"], unit, cwd)
         if isinstance(launched, str):
@@ -465,6 +620,18 @@ def collect(root: Path, handle: str) -> dict[str, str]:
         loaded = _load(root, handle)
     except OrchestratorError as exc:
         return blank(ok="아니오", state="거부", reason=str(exc))
+    changed = _restore_guard(loaded)
+    if changed:
+        record = blank(
+            ok="예",
+            handle=handle,
+            state="문제",
+            line="",
+            reason=" || ".join(changed),
+        )
+        loaded.update(record)
+        _write(root, loaded)
+        return record
     cwd = Path(loaded.get("cwd") or root)
     owner = loaded.get("work", "")
     candidates = [cwd / "result.md"]
