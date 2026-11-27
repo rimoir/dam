@@ -1084,29 +1084,38 @@ def materialize_snapshot(cwd: Path, snapshot: dict[str, str], dest: Path) -> str
     return None
 
 
-def _isolate_script(real_home: str, ready_fd: int) -> str:
-    home = shlex.quote(real_home)
-    root_home = shlex.quote("/root")
+def _isolate_script(ready_fd: int) -> str:
     return (
         "#!/bin/sh\n"
         "set -e\n"
         "copy=$1\n"
         "shift\n"
         "mount --make-rprivate / || exit 77\n"
-        f"mount -t tmpfs tmpfs {home} || exit 78\n"
-        f"if [ -d {root_home} ]; then mount -t tmpfs tmpfs {root_home} || exit 78; fi\n"
-        "mount -t tmpfs tmpfs /mnt || exit 79\n"
-        "mkdir -p /mnt/copy\n"
-        'mount --bind "$copy" /mnt/copy || exit 79\n'
-        "cd /mnt/copy || exit 79\n"
-        "mount -t tmpfs tmpfs /tmp || exit 79\n"
-        "mount -o remount,bind,ro / || exit 80\n"
-        "mount -o remount,bind,rw /mnt/copy || exit 80\n"
+        "root=$(mktemp -d)\n"
+        "mount -t tmpfs -o mode=755 tmpfs \"$root\" || exit 79\n"
+        "mkdir -p \"$root/usr\" \"$root/proc\" \"$root/tmp\" \"$root/dev\" \"$root/mnt/copy\"\n"
+        "mount --bind /usr \"$root/usr\" || exit 79\n"
+        "mount -o remount,bind,ro \"$root/usr\" || exit 79\n"
+        "for name in bin lib lib64 sbin; do\n"
+        "  if [ -L \"/$name\" ]; then\n"
+        "    ln -s \"$(readlink \"/$name\")\" \"$root/$name\"\n"
+        "  elif [ -d \"/$name\" ]; then\n"
+        "    mkdir -p \"$root/$name\"\n"
+        "    mount --bind \"/$name\" \"$root/$name\" || exit 79\n"
+        "    mount -o remount,bind,ro \"$root/$name\" || exit 79\n"
+        "  fi\n"
+        "done\n"
+        "for node in null zero urandom; do\n"
+        "  touch \"$root/dev/$node\"\n"
+        "  mount --bind \"/dev/$node\" \"$root/dev/$node\" || exit 79\n"
+        "done\n"
+        "mount -t tmpfs -o mode=1777 tmpfs \"$root/tmp\" || exit 79\n"
+        "mount --bind \"$copy\" \"$root/mnt/copy\" || exit 79\n"
         f"printf r >&{ready_fd} || exit 81\n"
         f"exec {ready_fd}>&-\n"
-        "exec unshare -U --map-root-user setpriv --no-new-privs --inh-caps=-all "
-        "--bounding-set=-all -- env -i PATH=/usr/bin:/bin HOME=/mnt/copy/empty-home "
-        'TMPDIR=/tmp "$@"\n'
+        "exec unshare -fp --mount-proc -R \"$root\" -w /mnt/copy -U --map-root-user "
+        "setpriv --no-new-privs --inh-caps=-all --bounding-set=-all -- "
+        "env -i PATH=/usr/bin:/bin HOME=/mnt/copy/empty-home TMPDIR=/tmp \"$@\"\n"
     )
 
 
@@ -1115,7 +1124,7 @@ def _locked_command(copy: Path, command: str) -> tuple[int, str, str]:
     read_fd, write_fd = os.pipe()
     os.set_inheritable(write_fd, True)
     wrapper = copy / "isolate"
-    wrapper.write_text(_isolate_script(str(Path.home()), write_fd), encoding="utf-8")
+    wrapper.write_text(_isolate_script(write_fd), encoding="utf-8")
     wrapper.chmod(0o755)
     proc = subprocess.Popen(
         [
