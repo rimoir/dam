@@ -184,7 +184,16 @@ class AdapterShapeTest(unittest.TestCase):
             self.assertEqual(tuple(parse_record(polled.stdout)), FIELDS)
             self.assertEqual(tuple(parse_record(collected.stdout)), FIELDS)
             seen.append(list(parse_record(started.stdout)))
-            self.assertFalse((root / "marker.txt").exists())
+            if name == "native":
+                appeared = False
+                for _ in range(40):
+                    if (root / "marker.txt").exists():
+                        appeared = True
+                        break
+                    time.sleep(0.05)
+                self.assertTrue(appeared)
+            else:
+                self.assertFalse((root / "marker.txt").exists())
         self.assertEqual(seen[0].__len__(), seen[1].__len__())
 
     def test_cli_unknown_name_refuses(self) -> None:
@@ -270,6 +279,34 @@ class ClaudeLaunchTest(unittest.TestCase):
         self.assertNotIn("bypassPermissions", argv)
         self.assertNotIn("dangerously-skip-permissions", argv)
         self.assertFalse((self.root / "codex-ran.txt").exists())
+
+    def test_launch_cwd_is_the_worktree(self) -> None:
+        write_work(
+            self.root,
+            "780078",
+            "- 검증용 | 없음 | scripts/orchestrator.py | python3 -m unittest scripts.orchestrator_test",
+            GO,
+        )
+        dest = self.root.resolve().parent / "dam-780078"
+        if dest.exists():
+            self.skipTest("작업 폴더가 이미 있다")
+        dest.mkdir()
+        try:
+            started = self._run("start", "--unit", "검증용")
+            self.assertEqual(started.returncode, 0, started.stderr)
+            parsed = parse_record(started.stdout)
+            seen = ""
+            for _ in range(40):
+                polled = self._run("poll", "--handle", parsed["handle"])
+                seen = parse_record(polled.stdout)["state"]
+                if seen == "끝":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(seen, "끝")
+            self.assertTrue((dest / "result.md").is_file())
+            self.assertFalse((self.root / "result.md").exists())
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
 
     def test_codex_is_not_launched(self) -> None:
         old = os.environ.get("ORCH_TOOL")

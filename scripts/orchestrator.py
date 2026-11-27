@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """워커 시작, 지켜보기, 수거. 이 파일만 orchestrator 키를 읽는다.
 
-실제 도구를 띄우는 코드는 없다. native와 fake는 같은 다섯 칸을 돌려준다.
+native는 PATH의 claude만 띄운다. fake는 띄우지 않는다.
+Codex는 미검증이라 띄우지 않는다. 다섯 칸은 그대로다.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -34,6 +36,13 @@ KNOWN = frozenset({"native", "fake"})
 HANDLE = re.compile(r"^(native|fake)-[0-9]+$")
 WORKER_LIMIT = 3  # 임시. 측정 뒤 고친다.
 STALL_LIMIT_SECONDS = 900  # 임시. 측정 뒤 고친다.
+MAX_TURNS = 40  # 임시. 측정 뒤 고친다.
+# ADR 0007 제안의 push, PR, 머지를 넘기는 자리다. 이 문자열이 경계는 아니다.
+ALLOWED_TOOLS = (
+    "Bash(git status *) Bash(git diff *) Bash(git add *) Bash(git commit *) "
+    "Bash(git push *) Bash(gh pr create *) Bash(gh pr comment *) "
+    "Bash(gh pr merge *) Bash(python3 scripts/*)"
+)
 _NOTE_SUFFIXES = {".md", ".txt", ".json"}
 
 
@@ -98,15 +107,96 @@ def _write(root: Path, record: dict[str, str]) -> None:
     path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
 
 
-def _read(root: Path, handle: str) -> dict[str, str]:
+def _load(root: Path, handle: str) -> dict[str, str]:
     path = _path(root, handle)
     if not path.is_file():
-        return blank(ok="아니오", state="거부", reason="핸들이 없다")
+        raise OrchestratorError("핸들이 없다")
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
-        return blank(ok="아니오", state="거부", reason="핸들을 읽지 못했다")
-    return blank(**{key: str(loaded.get(key, "")) for key in FIELDS})
+        raise OrchestratorError("핸들을 읽지 못했다") from None
+    if not isinstance(loaded, dict):
+        raise OrchestratorError("핸들을 읽지 못했다")
+    return {str(key): str(value) for key, value in loaded.items()}
+
+
+def _read(root: Path, handle: str) -> dict[str, str]:
+    try:
+        loaded = _load(root, handle)
+    except OrchestratorError as exc:
+        return blank(ok="아니오", state="거부", reason=str(exc))
+    return blank(**{key: loaded.get(key, "") for key in FIELDS})
+
+
+def _tool_choice() -> str:
+    return os.environ.get("ORCH_TOOL", "claude").strip() or "claude"
+
+
+def worker_cwd(root: Path, unit: str) -> Path:
+    owner = work_owning_unit(root, unit)
+    if owner and owner != "*" and re.fullmatch(r"[0-9]+", owner):
+        dest = root.resolve().parent / f"dam-{owner}"
+        if dest.is_dir():
+            return dest
+    return root
+
+
+def worker_prompt(root: Path, unit: str) -> str:
+    owner = work_owning_unit(root, unit)
+    brief = unit
+    if owner and owner != "*":
+        try:
+            brief = worker_brief(root, owner)
+        except OrchestratorError:
+            brief = unit
+    return (
+        brief
+        + "\n끝이면 result.md의 결과 칸을 PASS, ISSUES, BLOCKED 중 하나로 시작해 채워라.\n"
+        + "push와 PR과 머지는 이 작업 브랜치에서만 한다.\n"
+    )
+
+
+def _launch_claude(root: Path, handle: str, unit: str) -> tuple[int, str] | str | None:
+    if shutil.which("claude") is None:
+        return None
+    cwd = worker_cwd(root, unit)
+    exit_path = _store(root) / f"{handle}.exit"
+    out_path = _store(root) / f"{handle}.out"
+    wrapper = 'claude "$@"; echo $? > "$ORCH_EXIT"'
+    env = os.environ.copy()
+    env["ORCH_EXIT"] = str(exit_path)
+    out = out_path.open("w", encoding="utf-8")
+    try:
+        proc = subprocess.Popen(
+            [
+                "sh",
+                "-c",
+                wrapper,
+                "sh",
+                "-p",
+                worker_prompt(root, unit),
+                "--output-format",
+                "json",
+                "--permission-mode",
+                "acceptEdits",
+                "--permission-prompts",
+                "none",
+                "--max-turns",
+                str(MAX_TURNS),
+                "--allowedTools",
+                ALLOWED_TOOLS,
+            ],
+            cwd=cwd,
+            env=env,
+            stdout=out,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    except OSError:
+        return "claude를 띄우지 못했다"
+    finally:
+        out.close()
+    return proc.pid, str(cwd)
 
 
 def paths_overlap(left: str, right: str) -> bool:
@@ -279,22 +369,82 @@ def start(root: Path, unit: str) -> dict[str, str]:
             state="거부",
             reason=f"orchestrator 선택을 모른다: {name}",
         )
+    if _tool_choice() == "codex":
+        return blank(ok="아니오", state="거부", reason="Codex는 미검증이다")
     folder = _store(root)
     number = 1 + sum(1 for _found in folder.glob(f"{name}-*.json"))
     record = blank(ok="예", handle=f"{name}-{number}", state="대기")
-    _write(root, record)
+    extra: dict[str, str] = {}
+    if name == "native":
+        launched = _launch_claude(root, record["handle"], unit)
+        if isinstance(launched, str):
+            return blank(ok="아니오", state="거부", reason=launched)
+        if launched is not None:
+            pid, cwd = launched
+            record["state"] = "진행"
+            extra = {"tool": "claude", "pid": str(pid), "cwd": cwd}
+            owner = work_owning_unit(root, unit)
+            if owner and owner != "*":
+                extra["work"] = owner
+    _write(root, {**record, **extra})
     return _read(root, record["handle"])
 
 
 def poll(root: Path, handle: str) -> dict[str, str]:
     try:
-        return _read(root, handle)
+        loaded = _load(root, handle)
     except OrchestratorError as exc:
         return blank(ok="아니오", state="거부", reason=str(exc))
+    if loaded.get("tool") == "claude":
+        exit_path = _store(root) / f"{handle}.exit"
+        if exit_path.is_file():
+            loaded["state"] = "끝"
+            loaded["exit"] = exit_path.read_text(encoding="utf-8").strip()
+        else:
+            loaded["state"] = "진행"
+        _write(root, loaded)
+    return blank(**{key: loaded.get(key, "") for key in FIELDS})
 
 
 def collect(root: Path, handle: str) -> dict[str, str]:
-    return poll(root, handle)
+    polled = poll(root, handle)
+    if polled["ok"] != "예" or polled["state"] != "끝":
+        return polled
+    try:
+        loaded = _load(root, handle)
+    except OrchestratorError as exc:
+        return blank(ok="아니오", state="거부", reason=str(exc))
+    cwd = Path(loaded.get("cwd") or root)
+    owner = loaded.get("work", "")
+    candidates = [cwd / "result.md"]
+    if owner:
+        candidates.append(cwd / ".team" / "sessions" / owner / "result.md")
+        candidates.append(root / ".team" / "sessions" / owner / "result.md")
+    result_path = next((path for path in candidates if path.is_file()), candidates[0])
+    raw = result_path.read_text(encoding="utf-8") if result_path.is_file() else ""
+    cleaned = redact_secret(raw)
+    if result_path.is_file() and cleaned != raw:
+        result_path.write_text(cleaned, encoding="utf-8")
+    line = result_section_line(cleaned)
+    try:
+        code = int(loaded.get("exit", "0") or "0")
+    except ValueError:
+        code = 1
+    state_text = ""
+    if owner:
+        for folder in (
+            cwd / ".team" / "sessions" / owner,
+            root / ".team" / "sessions" / owner,
+        ):
+            state_path = folder / "state.md"
+            if state_path.is_file():
+                state_text = state_path.read_text(encoding="utf-8")
+            scrub_notes(folder)
+    kind = judge(code, line, next_action_updated(state_text))
+    record = blank(ok="예", handle=handle, state=kind, line=line)
+    loaded.update(record)
+    _write(root, loaded)
+    return record
 
 
 def _git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:

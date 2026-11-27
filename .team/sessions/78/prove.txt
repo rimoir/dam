@@ -1,8 +1,12 @@
-$ rg claude|codex|Popen scripts/orchestrator.py
-no-launcher
 $ python3 scripts/orchestrator_test.py
-.........................
+................................
 ----------------------------------------------------------------------
-Ran 25 tests in 1.245s
+Ran 32 tests in 2.141s
+
+OK
+$ python3 -m unittest scripts.orchestrator_test.ClaudeLaunchTest
+...
+----------------------------------------------------------------------
+Ran 3 tests in 0.309s
 
 OK
