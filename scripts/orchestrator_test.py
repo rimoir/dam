@@ -797,6 +797,33 @@ class ToolScopeTest(unittest.TestCase):
         self.assertNotIn("Bash(python3 scripts/orchestrator_test.py *)", argv)
         self.assertIn("core.hooksPath=/dev/null", argv)
 
+    def test_argv_has_no_code_run_or_commit(self) -> None:
+        write_work(
+            self.root,
+            "780097",
+            "- 검증용 | 없음 | scripts/a.py | python3 scripts/orchestrator_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, "780097")
+        try:
+            started = self._run("start", "--unit", "검증용")
+            self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+            handle = parse_record(started.stdout)["handle"]
+            seen = ""
+            for _ in range(40):
+                polled = self._run("poll", "--handle", handle)
+                seen = parse_record(polled.stdout)["state"]
+                if seen == "끝":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(seen, "끝")
+            argv = (self.root / "argv.txt").read_text(encoding="utf-8")
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+        allowed = argv.split("--allowedTools", 1)[-1]
+        self.assertNotIn("python3", allowed)
+        self.assertNotIn("commit", allowed)
+
     def test_remote_verification_refuses(self) -> None:
         write_work(
             self.root,
