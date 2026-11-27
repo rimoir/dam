@@ -326,6 +326,87 @@ class ClaudeLaunchTest(unittest.TestCase):
         self.assertFalse((self.root / "codex-ran.txt").exists())
 
 
+class LaunchBoundaryTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.bindir = self.root / "bin"
+        self.bindir.mkdir()
+        self.log = self.root / "path-claude.log"
+        (self.bindir / "claude").write_text(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$ORCH_PATH_CLAUDE_LOG\"\nexit 0\n",
+            encoding="utf-8",
+        )
+        (self.bindir / "claude").chmod(0o755)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _env(self, root: Path | None = None) -> dict[str, str]:
+        env = os.environ.copy()
+        env.pop("ORCH_CLAUDE", None)
+        env["PATH"] = str(self.bindir) + os.pathsep + env.get("PATH", "")
+        env["ORCH_PATH_CLAUDE_LOG"] = str(self.log)
+        env["TEAM_ROOT"] = str(root or self.root)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        return env
+
+    def _start(self, *args: str, root: Path | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["python3", str(SCRIPT), *args],
+            cwd=root or self.root,
+            env=self._env(root),
+            text=True,
+            capture_output=True,
+        )
+
+    def test_unplanned_unit_refuses_without_a_process(self) -> None:
+        started = self._start("start", "--unit", "박스확인")
+        self.assertNotEqual(started.returncode, 0, started.stdout + started.stderr)
+        parsed = parse_record(started.stdout)
+        self.assertEqual(parsed["state"], "거부")
+        self.assertEqual(parsed["handle"], "")
+        self.assertIn("계획", parsed["reason"])
+        self.assertFalse(self.log.exists())
+        self.assertFalse((self.root / ".team" / "orchestrator").exists())
+
+    def test_planned_unit_without_a_worktree_refuses(self) -> None:
+        write_work(
+            self.root,
+            "78",
+            "- 검증용 | 없음 | scripts/orchestrator.py | python3 scripts/orchestrator_test.py",
+            GO,
+        )
+        started = self._start("start", "--unit", "검증용")
+        self.assertNotEqual(started.returncode, 0, started.stdout + started.stderr)
+        parsed = parse_record(started.stdout)
+        self.assertEqual(parsed["state"], "거부")
+        self.assertEqual(parsed["handle"], "")
+        self.assertIn("작업 폴더", parsed["reason"])
+        self.assertFalse(self.log.exists())
+
+    def test_suite_never_calls_a_path_claude(self) -> None:
+        if os.environ.get("ORCH_SUITE_CHILD") == "1":
+            return
+        env = os.environ.copy()
+        env.pop("ORCH_CLAUDE", None)
+        env["PATH"] = str(self.bindir) + os.pathsep + env.get("PATH", "")
+        env["ORCH_PATH_CLAUDE_LOG"] = str(self.log)
+        env["ORCH_SUITE_CHILD"] = "1"
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        done = subprocess.run(
+            ["python3", str(SCRIPT.with_name("orchestrator_test.py"))],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=120,
+        )
+        called = self.log.read_text(encoding="utf-8") if self.log.exists() else ""
+        self.assertEqual(called, "", called)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+
+
 class TrackerRegressionTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
