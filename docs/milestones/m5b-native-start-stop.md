@@ -4,7 +4,7 @@ native 시작은 PATH의 `claude`를 비대화형으로 띄운다. Codex는 미�
 
 ## 아직 비어 있는 것
 
-`docs/milestones/m5b-hr-p-check.md`의 결과 칸은 모두 `결과: 아직 없음`이다. 그 칸과 Codex 단계, Codex 시작 5회는 https://github.com/rimoir/dam/issues/139 에서 채운다. Claude 시작 시간 중간값은 `.team/sessions/78/result.md`에 있다.
+`docs/milestones/m5b-hr-p-check.md`의 Claude 단계 결과는 공용 박스 기록이다. Codex 단계와 HR P Mac 확인은 https://github.com/rimoir/dam/issues/139 에서 대기한다. Claude 시작 시간 중간값은 `.team/sessions/78/result.md`에 있다.
 
 ## 보안 경계는 그대로 둔다
 

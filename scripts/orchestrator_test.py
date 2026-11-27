@@ -1985,12 +1985,14 @@ class ProbeStepsTest(unittest.TestCase):
             "시작 시간",
             "정리",
             "실행하지 않는다",
-            "결과: 아직 없음",
+            "공용 박스",
+            "#139로 옮김",
         ):
             self.assertIn(phrase, done.stdout)
         self.assertFalse((self.root / "marker.txt").exists())
         doc = (ROOT / "docs" / "milestones" / "m5b-hr-p-check.md").read_text(encoding="utf-8")
-        self.assertIn("결과: 아직 없음", doc)
+        self.assertIn("공용 박스", doc)
+        self.assertIn("#139로 옮김", doc)
         self.assertIn("샌드박스를 끄지 않는다", doc)
 
 
