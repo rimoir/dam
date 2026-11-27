@@ -729,6 +729,105 @@ class MissingBinaryTest(unittest.TestCase):
         self._assert_refused(done, "실행 파일이 없다")
 
 
+class ToolScopeTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        bindir = self.root / "bin"
+        bindir.mkdir()
+        (bindir / "claude").write_text(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$ORCH_ARGV\"\nexit 0\n",
+            encoding="utf-8",
+        )
+        (bindir / "claude").chmod(0o755)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["ORCH_ARGV"] = str(self.root / "argv.txt")
+        env["ORCH_CLAUDE"] = str(self.root / "bin" / "claude")
+        env["PATH"] = str(self.root / "bin") + os.pathsep + env.get("PATH", "")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        return subprocess.run(
+            ["python3", str(SCRIPT), *args],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_argv_allows_only_the_unit_check(self) -> None:
+        write_work(
+            self.root,
+            "780093",
+            "- 검증용 | 없음 | scripts/a.py | python3 scripts/orchestrator_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, "780093")
+        try:
+            started = self._run("start", "--unit", "검증용")
+            self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+            seen = ""
+            handle = parse_record(started.stdout)["handle"]
+            for _ in range(40):
+                polled = self._run("poll", "--handle", handle)
+                seen = parse_record(polled.stdout)["state"]
+                if seen == "끝":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(seen, "끝")
+            argv = (self.root / "argv.txt").read_text(encoding="utf-8")
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+        self.assertNotIn("scripts/*", argv)
+        self.assertNotIn("team-session.py", argv)
+        self.assertNotIn("git status *", argv)
+        self.assertNotIn("git add *", argv)
+        self.assertIn("Bash(python3 scripts/orchestrator_test.py)", argv)
+        self.assertNotIn("Bash(python3 scripts/orchestrator_test.py *)", argv)
+        self.assertIn("core.hooksPath=/dev/null", argv)
+
+    def test_remote_verification_refuses(self) -> None:
+        write_work(
+            self.root,
+            "780094",
+            "- 검증용 | 없음 | scripts/team-session.py | python3 scripts/team-session.py pull",
+            GO,
+        )
+        dest = place_worktree(self.root, "780094")
+        try:
+            started = self._run("start", "--unit", "검증용")
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+        self.assertNotEqual(started.returncode, 0, started.stdout + started.stderr)
+        parsed = parse_record(started.stdout)
+        self.assertEqual(parsed["state"], "거부")
+        self.assertEqual(parsed["handle"], "")
+        self.assertIn("원격", parsed["reason"])
+        self.assertFalse((self.root / ".team" / "orchestrator").exists())
+
+    def test_missing_verification_refuses(self) -> None:
+        write_work(
+            self.root,
+            "780095",
+            "- 검증용 | 없음 | scripts/a.py | ",
+            GO,
+        )
+        dest = place_worktree(self.root, "780095")
+        try:
+            started = self._run("start", "--unit", "검증용")
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+        self.assertNotEqual(started.returncode, 0, started.stdout + started.stderr)
+        parsed = parse_record(started.stdout)
+        self.assertEqual(parsed["state"], "거부")
+        self.assertEqual(parsed["handle"], "")
+        self.assertIn("검증 명령이 없다", parsed["reason"])
+
+
 class GateTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
