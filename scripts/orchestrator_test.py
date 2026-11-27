@@ -499,6 +499,69 @@ def write_work(root: Path, work_id: str, plan: str, log: str) -> None:
     (folder / "log.md").write_text(log, encoding="utf-8")
 
 
+SPACED_PLAN = (
+    "- 멈춤 계획 | 없음 | docs/a.md | python3 scripts/orchestrator_test.py\n"
+    "- Claude 시작 | 멈춤 계획 | scripts/orchestrator.py | python3 scripts/orchestrator_test.py\n"
+    "- 시작 경계 | 없음 | scripts/orchestrator_test.py | python3 scripts/orchestrator_test.py"
+)
+
+
+class SpacedUnitTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        write_work(self.root, "78", SPACED_PLAN, GO)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_spaced_name_starts_after_admit_allows_it(self) -> None:
+        admitted = run_orch(
+            self.root,
+            "admit",
+            "--work",
+            "78",
+            "--unit",
+            "Claude 시작",
+            "--finished",
+            "멈춤 계획",
+        )
+        self.assertEqual(admitted.returncode, 0, admitted.stderr)
+        allowed = parse_record(admitted.stdout)
+        self.assertEqual(allowed["state"], "허용")
+        self.assertEqual(allowed["line"], "Claude 시작")
+        dest = place_worktree(self.root, "78")
+        try:
+            started = run_orch(
+                self.root,
+                "start",
+                "--unit",
+                "Claude 시작",
+                "--finished",
+                "멈춤 계획",
+            )
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+        self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+        parsed = parse_record(started.stdout)
+        self.assertEqual(parsed["ok"], "예")
+        self.assertEqual(parsed["state"], "허용")
+        self.assertTrue(parsed["handle"].startswith("native-"))
+        self.assertNotIn("계획에 없는", parsed["reason"])
+
+    def test_two_spaced_names_stay_whole(self) -> None:
+        dest = place_worktree(self.root, "78")
+        try:
+            started = run_orch(self.root, "start", "--work", "78")
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+        self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+        parsed = parse_record(started.stdout)
+        self.assertEqual(parsed["ok"], "예")
+        self.assertEqual(parsed["line"], "멈춤 계획 시작 경계")
+        self.assertEqual(parsed["handle"].count("native-"), 2)
+
+
 class GateTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
