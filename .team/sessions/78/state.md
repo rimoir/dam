@@ -32,4 +32,4 @@
 
 ## 다음 할 일
 
-Codex 단계와 HR P PC 확인은 https://github.com/rimoir/dam/issues/139 에서 한다. 이 세션에서는 그 칸을 채우지 않는다.
+Codex 단계와 HR P PC 확인은 #139다.
