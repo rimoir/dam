@@ -24,7 +24,7 @@ Codex가 작업 폴더 커밋을 막는지는 아직 모른다. 샌드박스를 
 3. handle은 노트 루트의 `.team/orchestrator`에 둔다. 워커의 작업 폴더 아래에는 그 파일이 없다.
 4. 제품 명령은 PATH에서 `claude`를 고른 뒤 그 절대 경로만 실행한다. `ORCH_CLAUDE`가 `-`이면 PATH를 보지 않는다. 테스트는 이 값으로 실제 도구를 막는다.
 5. 워커마다 횟수 상한은 40이다. 임시이고, 시작 시간을 잰 뒤에 고친다.
-6. `--permission-mode acceptEdits`, `--permission-prompts none`, `--output-format json`을 쓴다.
+6. `--permission-mode acceptEdits`, `--permission-prompts none`, `--output-format stream-json`, `--verbose`를 쓴다. 첫 이벤트까지 걸린 시간은 공개 다섯 칸 밖에 둔다. 결과 줄은 result.md에서 거둔다.
 7. push, PR, 머지 도구는 제안대로 넘긴다. 새 토큰은 없다.
 8. poll은 종료 파일을 보고 끝으로 바꾼다. collect는 결과 칸 한 줄을 거두고 토큰을 가린다.
 

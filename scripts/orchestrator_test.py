@@ -247,6 +247,7 @@ class ClaudeLaunchTest(unittest.TestCase):
         (bindir / "claude").write_text(
             "#!/bin/sh\n"
             'printf \'%s\\n\' "$*" > "$ORCH_ARGV"\n'
+            'printf \'%s\\n\' \'{"type":"system","subtype":"init"}\'\n'
             'printf \'%s\\n\' "## 결과" "" "PASS 끝" > result.md\n'
             "exit 0\n",
             encoding="utf-8",
@@ -312,6 +313,8 @@ class ClaudeLaunchTest(unittest.TestCase):
         argv = (self.root / "claude-argv.txt").read_text(encoding="utf-8")
         self.assertIn("--max-turns", argv)
         self.assertIn("40", argv)
+        self.assertIn("stream-json", argv)
+        self.assertIn("--verbose", argv)
         self.assertIn("acceptEdits", argv)
         self.assertNotIn("bypassPermissions", argv)
         self.assertNotIn("dangerously-skip-permissions", argv)
@@ -322,6 +325,9 @@ class ClaudeLaunchTest(unittest.TestCase):
         handle = self.root / ".team" / "orchestrator" / f"{parsed['handle']}.json"
         self.assertTrue(handle.is_file())
         self.assertFalse(str(handle.resolve()).startswith(str(dest)))
+        self.assertNotIn("first_event", collected.stdout)
+        stored = json.loads(handle.read_text(encoding="utf-8"))
+        self.assertRegex(stored.get("first_event", ""), r"^[0-9]+(\.[0-9]+)?$")
 
     def test_launch_cwd_is_the_worktree(self) -> None:
         write_work(

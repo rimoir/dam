@@ -16,3 +16,4 @@ https://github.com/rimoir/dam/issues/78
 - 멈춤 계획 | 없음 | docs/milestones/m5b-native-start-stop.md | python3 scripts/orchestrator_test.py
 - Claude 시작 | 멈춤 계획 | scripts/orchestrator.py, scripts/orchestrator_test.py, docs/milestones/m5b-native-start-stop.md | python3 scripts/orchestrator_test.py
 - 시작 경계 | Claude 시작 | scripts/orchestrator.py, scripts/orchestrator_test.py, docs/milestones/m5b-native-start-stop.md | python3 scripts/orchestrator_test.py
+- 이름 목록 | 시작 경계 | scripts/orchestrator.py, scripts/orchestrator_test.py, docs/milestones/m5b-native-start-stop.md | python3 scripts/orchestrator_test.py

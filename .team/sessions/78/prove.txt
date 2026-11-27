@@ -1,12 +1,6 @@
 $ python3 scripts/orchestrator_test.py
-...................................
+.....................................
 ----------------------------------------------------------------------
-Ran 35 tests in 4.212s
-
-OK
-$ python3 -m unittest scripts.orchestrator_test.LaunchBoundaryTest
-...
-----------------------------------------------------------------------
-Ran 3 tests in 2.166s
+Ran 37 tests in 4.572s
 
 OK

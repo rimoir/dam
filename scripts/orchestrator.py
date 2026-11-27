@@ -50,6 +50,24 @@ class OrchestratorError(Exception):
     pass
 
 
+class Admission(dict[str, str]):
+    """허용된 단위 이름 목록. 사람이 읽는 line을 다시 쪼개지 않는다."""
+
+    units: tuple[str, ...]
+
+    def __init__(
+        self,
+        ok: str,
+        state: str,
+        reason: str = "",
+        units: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(
+            blank(ok=ok, state=state, reason=reason, line=" ".join(units))
+        )
+        self.units = units
+
+
 def notes_root(explicit: str | None = None) -> Path:
     if explicit:
         return Path(explicit)
@@ -188,11 +206,26 @@ def _launch_claude(root: Path, handle: str, unit: str, cwd: Path) -> tuple[int, 
         return None
     exit_path = _store(root) / f"{handle}.exit"
     out_path = _store(root) / f"{handle}.out"
-    wrapper = '"$ORCH_CLAUDE_BIN" "$@"; echo $? > "$ORCH_EXIT"'
+    first_path = _store(root) / f"{handle}.first"
+    wrapper = (
+        'start=$(date +%s.%N); '
+        '"$ORCH_CLAUDE_BIN" "$@" > "$ORCH_OUT" 2>&1 & child=$!; '
+        'while kill -0 "$child" 2>/dev/null; do '
+        'if [ -s "$ORCH_OUT" ] && [ ! -f "$ORCH_FIRST" ]; then '
+        'end=$(date +%s.%N); '
+        'awk -v s="$start" -v e="$end" \'BEGIN{printf "%.3f\\n", e-s}\' > "$ORCH_FIRST"; '
+        'fi; sleep 0.02; done; '
+        'wait "$child"; echo $? > "$ORCH_EXIT"; '
+        'if [ -s "$ORCH_OUT" ] && [ ! -f "$ORCH_FIRST" ]; then '
+        'end=$(date +%s.%N); '
+        'awk -v s="$start" -v e="$end" \'BEGIN{printf "%.3f\\n", e-s}\' > "$ORCH_FIRST"; '
+        'fi'
+    )
     env = os.environ.copy()
     env["ORCH_EXIT"] = str(exit_path)
+    env["ORCH_OUT"] = str(out_path)
+    env["ORCH_FIRST"] = str(first_path)
     env["ORCH_CLAUDE_BIN"] = binary
-    out = out_path.open("w", encoding="utf-8")
     try:
         proc = subprocess.Popen(
             [
@@ -203,7 +236,8 @@ def _launch_claude(root: Path, handle: str, unit: str, cwd: Path) -> tuple[int, 
                 "-p",
                 worker_prompt(root, unit),
                 "--output-format",
-                "json",
+                "stream-json",
+                "--verbose",
                 "--permission-mode",
                 "acceptEdits",
                 "--permission-prompts",
@@ -215,14 +249,12 @@ def _launch_claude(root: Path, handle: str, unit: str, cwd: Path) -> tuple[int, 
             ],
             cwd=cwd,
             env=env,
-            stdout=out,
-            stderr=subprocess.STDOUT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
     except OSError:
         return "claude를 띄우지 못했다"
-    finally:
-        out.close()
     return proc.pid, str(cwd)
 
 
@@ -255,23 +287,23 @@ def admit_work(
     running: int = 0,
     selected: list[str] | None = None,
     finished: list[str] | None = None,
-) -> dict[str, str]:
+) -> Admission:
     folder = root / ".team" / "sessions" / work_id
     task_path = folder / "task.md"
     if not task_path.is_file():
-        return blank(ok="아니오", state="거부", reason=f"task.md가 없다: {work_id}")
+        return Admission("아니오", "거부", f"task.md가 없다: {work_id}")
     log_path = folder / "log.md"
     log_text = log_path.read_text(encoding="utf-8") if log_path.is_file() else ""
     if not log_has_go(log_text):
-        return blank(ok="아니오", state="거부", reason="go 없는 작업이다")
+        return Admission("아니오", "거부", "go 없는 작업이다")
     units = read_plan_units(task_path.read_text(encoding="utf-8"))
     if not units:
-        return blank(ok="아니오", state="거부", reason="계획 단위가 없다")
+        return Admission("아니오", "거부", "계획 단위가 없다")
     by_name = {item[0]: item for item in units}
-    names = list(selected) if selected else [item[0] for item in units]
+    names = tuple(selected) if selected else tuple(item[0] for item in units)
     for name in names:
         if name not in by_name:
-            return blank(ok="아니오", state="거부", reason=f"계획에 없는 단위다: {name}")
+            return Admission("아니오", "거부", f"계획에 없는 단위다: {name}")
     file_sets = {name: _unit_files(by_name[name][2]) for name in names}
     for index, left in enumerate(names):
         for right in names[index + 1 :]:
@@ -279,28 +311,16 @@ def admit_work(
                 for right_file in file_sets[right]:
                     if paths_overlap(left_file, right_file):
                         shown = _plan_path(left_file)
-                        return blank(
-                            ok="아니오",
-                            state="거부",
-                            reason=f"건드릴 파일이 겹친다: {shown}",
-                        )
+                        return Admission("아니오", "거부", f"건드릴 파일이 겹친다: {shown}")
     done = set(finished or [])
     for name in names:
         dep = by_name[name][1].strip()
         if not dep or dep == "없음" or dep in done:
             continue
-        return blank(
-            ok="아니오",
-            state="거부",
-            reason=f"앞 단위 결과가 입력이다: {dep}",
-        )
+        return Admission("아니오", "거부", f"앞 단위 결과가 입력이다: {dep}")
     if running + len(names) > WORKER_LIMIT:
-        return blank(
-            ok="아니오",
-            state="거부",
-            reason=f"동시 워커 상한 {WORKER_LIMIT}을 넘는다",
-        )
-    return blank(ok="예", state="허용", line=" ".join(names))
+        return Admission("아니오", "거부", f"동시 워커 상한 {WORKER_LIMIT}을 넘는다")
+    return Admission("예", "허용", units=names)
 
 
 def _ready_names(root: Path, work_id: str, finished: list[str] | None) -> list[str] | dict[str, str]:
@@ -377,7 +397,7 @@ def start_work(
     if decision["ok"] != "예":
         return decision
     handles: list[str] = []
-    for name in decision["line"].split():
+    for name in decision.units:
         record = start(root, name)
         if record["ok"] != "예":
             return record
@@ -472,6 +492,11 @@ def collect(root: Path, handle: str) -> dict[str, str]:
                 state_text = state_path.read_text(encoding="utf-8")
             scrub_notes(folder)
     kind = judge(code, line, next_action_updated(state_text))
+    first_path = _store(root) / f"{handle}.first"
+    if first_path.is_file():
+        stamp = first_path.read_text(encoding="utf-8").strip()
+        if stamp:
+            loaded["first_event"] = stamp
     record = blank(ok="예", handle=handle, state=kind, line=line)
     loaded.update(record)
     _write(root, loaded)
