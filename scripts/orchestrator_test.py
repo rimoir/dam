@@ -672,6 +672,63 @@ class NoteGuardTest(unittest.TestCase):
         self.assertNotIn("워커승인", later.stdout)
 
 
+class MissingBinaryTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        write_work(
+            self.root,
+            "780092",
+            "- 검증용 | 없음 | scripts/a.py | python3 scripts/a_test.py",
+            GO,
+        )
+        self.dest = place_worktree(self.root, "780092")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.dest, ignore_errors=True)
+        self.tmp.cleanup()
+
+    def _start(self, **env_over: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env.pop("ORCH_CLAUDE", None)
+        env["TEAM_ROOT"] = str(self.root)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env.update(env_over)
+        return subprocess.run(
+            ["python3", str(SCRIPT), "start", "--unit", "검증용"],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+    def _assert_refused(self, done: subprocess.CompletedProcess[str], reason: str) -> None:
+        self.assertNotEqual(done.returncode, 0, done.stdout + done.stderr)
+        parsed = parse_record(done.stdout)
+        self.assertEqual(parsed["state"], "거부")
+        self.assertEqual(parsed["handle"], "")
+        self.assertIn(reason, parsed["reason"])
+        self.assertFalse((self.root / ".team" / "orchestrator").exists())
+
+    def test_missing_explicit_path_refuses_without_a_handle(self) -> None:
+        done = self._start(ORCH_CLAUDE="/tmp/nope/claude")
+        self._assert_refused(done, "실행 파일이 없다")
+
+    def test_unexecutable_file_refuses_without_a_handle(self) -> None:
+        binary = self.root / "claude"
+        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        binary.chmod(0o644)
+        done = self._start(ORCH_CLAUDE=str(binary))
+        self._assert_refused(done, "실행할 수 없다")
+
+    def test_missing_path_claude_refuses_without_a_handle(self) -> None:
+        bindir = self.root / "safe-bin"
+        bindir.mkdir()
+        os.symlink(shutil.which("python3") or "python3", bindir / "python3")
+        done = self._start(PATH=str(bindir))
+        self._assert_refused(done, "실행 파일이 없다")
+
+
 class GateTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
