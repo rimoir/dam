@@ -39,6 +39,7 @@ class SessionHookTest(unittest.TestCase):
             command = hook["command"]
             self.assertIn("scripts/team-session.py", command)
             self.assertIn("start-context", command)
+            self.assertNotIn("--role", command)
             self.assertIn("|| true", command)
             self.assertNotIn("~/", command)
             self.assertNotIn("/home", command)
@@ -98,6 +99,34 @@ class SessionHookTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("훅을 확인한다", done.stdout)
         self.assertNotIn("TASK", done.stdout)
+
+    def test_hook_still_prints_author_decision_memo(self) -> None:
+        memo = "작성자 결정 메모: 이 문장은 검증 세션 시작 출력에 넣지 않는다"
+        command = command_of(load(CLAUDE))
+        self.assertNotIn("--role", command)
+        root = Path(tempfile.mkdtemp())
+        folder = root / ".team" / "sessions" / "79"
+        folder.mkdir(parents=True)
+        (folder / "state.md").write_text(f"## 결정\n{memo}\n", encoding="utf-8")
+        (root / ".team" / "board.md").write_text(
+            "- 79: 상태 시작, 담당 dev, 막힘 없음\n",
+            encoding="utf-8",
+        )
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(root)
+        env["CLAUDE_PROJECT_DIR"] = str(ROOT)
+        env.pop("GITHUB_HEAD_REF", None)
+        env["GITHUB_HEAD_REF"] = "work-79"
+        done = subprocess.run(
+            command,
+            cwd=ROOT,
+            env=env,
+            shell=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(memo, done.stdout)
 
 
 if __name__ == "__main__":

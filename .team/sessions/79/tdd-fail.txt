@@ -1,0 +1,5 @@
+start-context가 --role 검증을 받지 않는다.
+오류: unrecognized arguments: --role 검증
+VerifyStartTest 8개 중 7개 실패. 역할 없는 --switch 1개는 통과.
+session_context_test.py 전체 64개 중 실패 7개.
+session_hook_test.py 4개 통과. 훅 명령에 --role 없음.

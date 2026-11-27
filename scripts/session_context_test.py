@@ -920,5 +920,254 @@ class ResumeModeTest(unittest.TestCase):
         self.assertEqual(path.read_text(encoding="utf-8"), before)
 
 
+AUTHOR_MEMO = "작성자 결정 메모: 이 문장은 검증 세션 시작 출력에 넣지 않는다"
+BASE_SHA = "a" * 40
+HEAD_SHA = "b" * 40
+CRITERIA = "완료 기준 문장"
+CHECKS = "python3 scripts/session_context_test.py"
+
+
+def verify_text(
+    criteria: str = CRITERIA,
+    base: str = BASE_SHA,
+    head: str = HEAD_SHA,
+    checks: str = CHECKS,
+) -> str:
+    return f"완료 기준\n{criteria}\nBASE\n{base}\nHEAD\n{head}\n검사 명령\n{checks}\n"
+
+
+def write_author_tree(root: Path) -> None:
+    write_board(root, [board_line("79", "시작")])
+    write_note(
+        root,
+        "79",
+        f"모드: 기능\n## 결정\n{AUTHOR_MEMO}\n",
+        f"2026-11-27T00:00:00Z Codex go {AUTHOR_MEMO}\n",
+    )
+    folder = root / ".team" / "sessions" / "79"
+    (folder / "task.md").write_text(f"## 목표\n{AUTHOR_MEMO}\n", encoding="utf-8")
+    (folder / "result.md").write_text(f"## 결과\n{AUTHOR_MEMO}\n", encoding="utf-8")
+
+
+class VerifyStartTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        write_author_tree(self.root)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _verify(self, *args: str, root: Path | None = None) -> subprocess.CompletedProcess[str]:
+        return run_start(
+            root or self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            CRITERIA,
+            "--base",
+            BASE_SHA,
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            CHECKS,
+            *args,
+            head_ref="work-79",
+        )
+
+    def test_verify_role_prints_only_the_four_inputs(self) -> None:
+        done = self._verify()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, verify_text())
+        self.assertNotIn(AUTHOR_MEMO, done.stdout)
+        self.assertNotIn("TASK-SECRET", done.stdout)
+        self.assertNotIn("RESULT-SECRET", done.stdout)
+        self.assertNotIn("세션", done.stdout)
+        self.assertNotIn(board_line("79", "시작"), done.stdout)
+
+    def test_author_start_keeps_the_memo_and_differs(self) -> None:
+        author = run_start(self.root, head_ref="work-79")
+        verify = self._verify()
+        self.assertEqual(author.returncode, 0, author.stderr)
+        self.assertIn(AUTHOR_MEMO, author.stdout)
+        self.assertIn(board_line("79", "시작"), author.stdout)
+        self.assertEqual(verify.returncode, 0, verify.stderr)
+        self.assertEqual(verify.stdout, verify_text())
+        self.assertNotEqual(author.stdout, verify.stdout)
+        self.assertNotIn(AUTHOR_MEMO, verify.stdout)
+
+    def test_verify_role_does_not_read_notes(self) -> None:
+        bare = self.root / "bare"
+        bare.mkdir()
+        done = self._verify(root=bare)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, verify_text())
+
+    def test_multiline_inputs_stay_intact(self) -> None:
+        criteria = "첫째 조건\n둘째 조건"
+        checks = "python3 scripts/session_context_test.py\npython3 scripts/team-session.py check"
+        done = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            criteria,
+            "--base",
+            BASE_SHA,
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            checks,
+            head_ref="work-79",
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, verify_text(criteria=criteria, checks=checks))
+        self.assertNotIn(AUTHOR_MEMO, done.stdout)
+
+    def test_edges_are_stripped_and_sha_case_is_rejected(self) -> None:
+        done = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            f"  {CRITERIA}\n",
+            "--base",
+            f"  {BASE_SHA}\n",
+            "--head",
+            f"\t{HEAD_SHA}  ",
+            "--checks",
+            f"\n{CHECKS}\n",
+            head_ref="work-79",
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, verify_text())
+        upper = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            CRITERIA,
+            "--base",
+            "A" * 40,
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            CHECKS,
+            head_ref="work-79",
+        )
+        self.assertNotEqual(upper.returncode, 0)
+        self.assertIn("BASE 커밋 SHA가 아니다", upper.stderr)
+        self.assertNotIn(AUTHOR_MEMO, upper.stdout)
+
+    def test_missing_or_foreign_role_inputs_fail(self) -> None:
+        missing = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--base",
+            BASE_SHA,
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            CHECKS,
+            head_ref="work-79",
+        )
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("완료 기준이 없다", missing.stderr)
+        blank = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            "  ",
+            "--base",
+            BASE_SHA,
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            " \n ",
+            head_ref="work-79",
+        )
+        self.assertNotEqual(blank.returncode, 0)
+        self.assertIn("완료 기준이 없다", blank.stderr)
+        short = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            CRITERIA,
+            "--base",
+            "abc",
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            CHECKS,
+            head_ref="work-79",
+        )
+        self.assertIn("BASE 커밋 SHA가 아니다", short.stderr)
+        no_head = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            CRITERIA,
+            "--base",
+            BASE_SHA,
+            "--checks",
+            CHECKS,
+            head_ref="work-79",
+        )
+        self.assertIn("HEAD 커밋 SHA가 없다", no_head.stderr)
+        switched = self._verify("--switch")
+        self.assertNotEqual(switched.returncode, 0)
+        self.assertIn("검증 역할은 로그를 더하지 않는다", switched.stderr)
+        self.assertNotIn(AUTHOR_MEMO, switched.stdout)
+        naked = run_start(self.root, "--criteria", CRITERIA, head_ref="work-79")
+        self.assertNotEqual(naked.returncode, 0)
+        self.assertIn("역할 없이 검증 입력을 넘겼다", naked.stderr)
+        self.assertNotIn(AUTHOR_MEMO, naked.stdout)
+        other = run_start(
+            self.root,
+            "--role",
+            "작성",
+            "--criteria",
+            CRITERIA,
+            "--base",
+            BASE_SHA,
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            CHECKS,
+            head_ref="work-79",
+        )
+        self.assertIn("검증 역할이 아니다", other.stderr)
+
+    def test_over_limit_fails_closed(self) -> None:
+        done = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            "x" * INJECT_LIMIT,
+            "--base",
+            BASE_SHA,
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            CHECKS,
+            head_ref="work-79",
+        )
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn(f"검증 시작이 {INJECT_LIMIT}자를 넘는다", done.stderr)
+        self.assertNotIn("xxxx", done.stdout)
+        self.assertNotEqual(done.stdout, SHORTEN_LINE)
+
+    def test_switch_without_role_still_includes_the_memo(self) -> None:
+        done = run_start(self.root, "--switch", head_ref="work-79")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(AUTHOR_MEMO, done.stdout)
+        self.assertIn("Codex go", done.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
