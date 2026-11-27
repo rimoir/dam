@@ -40,11 +40,8 @@ HANDLE = re.compile(r"^(native|fake)-[0-9]+$")
 WORKER_LIMIT = 3  # 임시. 측정 뒤 고친다.
 STALL_LIMIT_SECONDS = 900  # 임시. 측정 뒤 고친다.
 MAX_TURNS = 40  # 임시. 측정 뒤 고친다.
-# 조회와 차이만. 수거는 워커 폴더에서 실행하지 않는다. ADR 0009.
-_LOCAL_TOOLS = (
-    "Bash(git -c core.hooksPath=/dev/null -c core.fsmonitor=false status)",
-    "Bash(git -c core.hooksPath=/dev/null -c core.fsmonitor=false diff)",
-)
+# Bash는 주지 않는다. 읽기와 쓰기는 Read, Edit, Write. ADR 0009.
+_WORKER_TOOLS = "Read,Edit,Write"
 _NOTE_SUFFIXES = {".md", ".txt", ".json"}
 
 
@@ -343,37 +340,41 @@ def _capture_guard(root: Path, cwd: Path, work_id: str) -> dict[str, list[dict[s
     return {"files": files}
 
 
-def _process_alive(pid: str) -> bool:
+def _group_alive(pid: str) -> bool:
     text = pid.strip()
-    if not text:
-        return False
     try:
         number = int(text)
     except ValueError:
         return False
     if number <= 0:
         return False
-    try:
-        os.kill(number, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
+    proc = Path("/proc")
+    if not proc.is_dir():
+        try:
+            os.kill(-number, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
         return True
-    except OSError:
-        return False
-    return not _zombie(number)
-
-
-def _zombie(number: int) -> bool:
-    try:
-        raw = Path(f"/proc/{number}/stat").read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        return False
-    end = raw.rfind(")")
-    if end == -1:
-        return False
-    fields = raw[end + 2 :].split()
-    return bool(fields) and fields[0] == "Z"
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            raw = (entry / "stat").read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        end = raw.rfind(")")
+        if end == -1:
+            continue
+        fields = raw[end + 2 :].split()
+        if len(fields) < 3 or fields[0] == "Z":
+            continue
+        if fields[2] == str(number):
+            return True
+    return False
 
 
 def _read_regular(path: Path) -> str | None:
@@ -449,10 +450,6 @@ def _restore_guard(loaded: dict[str, str], root: Path) -> tuple[str, ...]:
         if after_a != before_a:
             _write_regular(log_path, restore_approvals(log, before_a))
     return tuple(dict.fromkeys(changed))
-
-
-def allowed_tools() -> str:
-    return " ".join(_LOCAL_TOOLS)
 
 
 def _fingerprint(path: Path) -> str:
@@ -583,7 +580,7 @@ def tree_changes(before: dict[str, str], after: dict[str, str], allowed: str) ->
 
 
 def _launch_claude(
-    root: Path, handle: str, unit: str, cwd: Path, tools: str
+    root: Path, handle: str, unit: str, cwd: Path
 ) -> tuple[int, str] | str | None:
     binary = resolve_claude()
     if binary is None:
@@ -592,6 +589,7 @@ def _launch_claude(
     out_path = _store(root) / f"{handle}.out"
     first_path = _store(root) / f"{handle}.first"
     wrapper = (
+        'trap \'trap - TERM INT; kill -TERM -$$ 2>/dev/null\' TERM INT; '
         'start=$(date +%s.%N); '
         '"$ORCH_CLAUDE_BIN" "$@" > "$ORCH_OUT" 2>&1 & child=$!; '
         'while kill -0 "$child" 2>/dev/null; do '
@@ -628,8 +626,12 @@ def _launch_claude(
                 "none",
                 "--max-turns",
                 str(MAX_TURNS),
+                "--tools",
+                _WORKER_TOOLS,
+                "--disallowedTools",
+                "Bash",
                 "--allowedTools",
-                tools,
+                _WORKER_TOOLS,
             ],
             cwd=cwd,
             env=env,
@@ -822,9 +824,7 @@ def start(root: Path, unit: str) -> dict[str, str]:
         )
     if name == "native":
         extra["tree"] = json.dumps(snapshot_tree(cwd), ensure_ascii=False)
-        launched = _launch_claude(
-            root, record["handle"], unit, cwd, allowed_tools()
-        )
+        launched = _launch_claude(root, record["handle"], unit, cwd)
         if isinstance(launched, str):
             return blank(ok="아니오", state="거부", reason=launched)
         if launched is not None:
@@ -887,7 +887,7 @@ def collect(root: Path, handle: str) -> dict[str, str]:
         loaded = _load(root, handle)
     except OrchestratorError as exc:
         return blank(ok="아니오", state="거부", reason=str(exc))
-    if _process_alive(loaded.get("pid", "")):
+    if _group_alive(loaded.get("pid", "")):
         return blank(ok="예", handle=handle, state="대기", line="", reason="")
     cwd = Path(loaded.get("cwd") or root)
     owner = loaded.get("work", "")

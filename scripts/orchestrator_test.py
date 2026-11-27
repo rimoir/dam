@@ -338,11 +338,15 @@ class ClaudeLaunchTest(unittest.TestCase):
         for piece in ("git push", "gh pr create", "gh pr comment", "gh pr merge"):
             self.assertNotIn(piece, argv)
         self.assertNotIn("gh ", argv)
-        allowed = argv.split("--allowedTools", 1)[-1]
-        for piece in ("core.hooksPath=/dev/null", "status)", "diff)"):
-            self.assertIn(piece, allowed)
-        self.assertNotIn("commit", allowed)
-        self.assertNotIn("python3", allowed)
+        self.assertIn("--tools", argv)
+        self.assertIn("Read,Edit,Write", argv)
+        self.assertIn("--disallowedTools", argv)
+        flags = argv.split("--output-format", 1)[-1]
+        self.assertNotIn("Bash(", flags)
+        self.assertNotIn("git status", flags)
+        self.assertNotIn("git diff", flags)
+        self.assertNotIn("commit", flags)
+        self.assertNotIn("python3", flags)
         self.assertFalse((self.root / "codex-ran.txt").exists())
         self.assertTrue(
             (dest / ".team" / "sessions" / "780079" / "result.md").is_file()
@@ -815,9 +819,10 @@ class ToolScopeTest(unittest.TestCase):
         self.assertNotIn("team-session.py", allowed)
         self.assertNotIn("python3", allowed)
         self.assertNotIn("commit", allowed)
-        self.assertNotIn("git status *", allowed)
-        self.assertNotIn("git add *", allowed)
-        self.assertIn("core.hooksPath=/dev/null", allowed)
+        self.assertNotIn("Bash(", argv)
+        self.assertNotIn("git status", argv)
+        self.assertNotIn("git diff", argv)
+        self.assertNotIn("git add", argv)
 
     def test_argv_has_no_code_run_or_commit(self) -> None:
         write_work(
@@ -842,9 +847,10 @@ class ToolScopeTest(unittest.TestCase):
             argv = (self.root / "argv.txt").read_text(encoding="utf-8")
         finally:
             shutil.rmtree(dest, ignore_errors=True)
-        allowed = argv.split("--allowedTools", 1)[-1]
-        self.assertNotIn("python3", allowed)
-        self.assertNotIn("commit", allowed)
+        flags = argv.split("--output-format", 1)[-1]
+        self.assertNotIn("Bash(", flags)
+        self.assertNotIn("python3", flags)
+        self.assertNotIn("commit", flags)
 
     def test_remote_verification_is_not_run(self) -> None:
         write_work(
