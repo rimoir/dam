@@ -2119,5 +2119,214 @@ class BashGroupTest(unittest.TestCase):
         self.assertEqual(done["line"], "")
 
 
+class RestrictedPremiseTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.pids: list[int] = []
+
+    def tearDown(self) -> None:
+        for pid in self.pids:
+            if pid <= 1 or pid == os.getpid():
+                continue
+            try:
+                os.killpg(pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        parent = self.root.resolve().parent
+        shutil.rmtree(parent / "dam-780119", ignore_errors=True)
+        self.tmp.cleanup()
+
+    def _env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["ORCH_ARGV"] = str(self.root / "argv.txt")
+        env["ORCH_CLAUDE"] = str(self.root / "bin" / "claude")
+        env["PATH"] = str(self.root / "bin") + os.pathsep + env.get("PATH", "")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        return env
+
+    def _claude(self, body: str) -> None:
+        bindir = self.root / "bin"
+        bindir.mkdir(exist_ok=True)
+        script = bindir / "claude"
+        script.write_text("#!/bin/sh\n" + body + "\nexit 0\n", encoding="utf-8")
+        script.chmod(0o755)
+
+    def _remember(self, handle: str) -> int:
+        stored = json.loads(
+            (self.root / ".team" / "orchestrator" / f"{handle}.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        pid = int(stored.get("pid") or "0")
+        if pid:
+            self.pids.append(pid)
+        return pid
+
+    def test_argv_restricts_tools_and_mcp(self) -> None:
+        write_work(
+            self.root,
+            "780118",
+            "- 검증용 | 없음 | scripts/a.py | python3 scripts/a_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, "780118")
+        self._claude('printf \'%s\\n\' "$*" > "$ORCH_ARGV"')
+        env = self._env()
+        try:
+            started = subprocess.run(
+                ["python3", str(SCRIPT), "start", "--unit", "검증용"],
+                cwd=self.root,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+            handle = parse_record(started.stdout)["handle"]
+            self._remember(handle)
+            for _ in range(40):
+                polled = subprocess.run(
+                    ["python3", str(SCRIPT), "poll", "--handle", handle],
+                    cwd=self.root,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                )
+                if parse_record(polled.stdout)["state"] == "끝":
+                    break
+                time.sleep(0.05)
+            argv = (self.root / "argv.txt").read_text(encoding="utf-8")
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+        self.assertIn("--restricted", argv)
+        self.assertIn("--strict-mcp-config", argv)
+        self.assertNotIn("--mcp-config", argv)
+
+    def test_common_gitdir_config_change_is_not_success(self) -> None:
+        work_id = "780119"
+        write_work(
+            self.root,
+            work_id,
+            "- 검증용 | 없음 | scripts/ok_test.py | python3 scripts/ok_test.py",
+            GO,
+        )
+        (self.root / ".team" / "sessions" / work_id / "state.md").write_text(
+            "# 상태\n\n## 다음 할 일\n\n결과를 적었다\n",
+            encoding="utf-8",
+        )
+        main = self.root / "repo"
+        main.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=main, check=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=main, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=main, check=True)
+        (main / "scripts").mkdir()
+        (main / "scripts" / "ok_test.py").write_text("print('ok')\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=main, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "처음"], cwd=main, check=True)
+        dest = self.root.resolve().parent / f"dam-{work_id}"
+        added = subprocess.run(
+            ["git", "worktree", "add", "-q", "-b", f"worker/{work_id}", str(dest), "HEAD"],
+            cwd=main,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(added.returncode, 0, added.stderr)
+        self._claude(
+            "gitdir=$(sed -n 's/^gitdir: //p' .git)\n"
+            'case "$gitdir" in /*) ;; *) gitdir="$(pwd)/$gitdir" ;; esac\n'
+            'common=$(cat "$gitdir/commondir")\n'
+            'case "$common" in /*) ;; *) common="$gitdir/$common" ;; esac\n'
+            'git config --file "$common/config" filter.mark.clean "echo planted"\n'
+            f"mkdir -p .team/sessions/{work_id}\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 읽기' "
+            f"> .team/sessions/{work_id}/result.md"
+        )
+        env = self._env()
+        started = subprocess.run(
+            ["python3", str(SCRIPT), "start", "--unit", "검증용"],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+        handle = parse_record(started.stdout)["handle"]
+        self._remember(handle)
+        seen = ""
+        for _ in range(40):
+            polled = subprocess.run(
+                ["python3", str(SCRIPT), "poll", "--handle", handle],
+                cwd=self.root,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            seen = parse_record(polled.stdout)["state"]
+            if seen == "끝":
+                break
+            time.sleep(0.05)
+        self.assertEqual(seen, "끝")
+        collected = subprocess.run(
+            ["python3", str(SCRIPT), "collect", "--handle", handle],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        done = parse_record(collected.stdout)
+        self.assertNotEqual(done["state"], "성공")
+        self.assertEqual(done["state"], "문제")
+        self.assertIn("common/config", done["reason"])
+
+    def test_live_child_is_not_finished_by_poll(self) -> None:
+        work_id = "780120"
+        write_work(
+            self.root,
+            work_id,
+            "- 검증용 | 없음 | scripts/a.py | python3 scripts/a_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, work_id)
+        self._claude(
+            f"mkdir -p .team/sessions/{work_id}\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 읽기' "
+            f"> .team/sessions/{work_id}/result.md\n"
+            'printf \'%s\\n\' 0 > "$ORCH_EXIT"\n'
+            "sleep 60 &"
+        )
+        env = self._env()
+        try:
+            started = subprocess.run(
+                ["python3", str(SCRIPT), "start", "--unit", "검증용"],
+                cwd=self.root,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+            handle = parse_record(started.stdout)["handle"]
+            pid = self._remember(handle)
+            gone = False
+            for _ in range(50):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    gone = True
+                    break
+                time.sleep(0.05)
+            self.assertTrue(gone)
+            polled = subprocess.run(
+                ["python3", str(SCRIPT), "poll", "--handle", handle],
+                cwd=self.root,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+        self.assertEqual(parse_record(polled.stdout)["state"], "대기")
+
+
 if __name__ == "__main__":
     unittest.main()
