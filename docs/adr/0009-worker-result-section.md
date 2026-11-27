@@ -10,13 +10,13 @@
 
 ## 결정
 
-워커가 노트에서 쓸 수 있는 곳은 결과 칸뿐이다. 작업 폴더의 코드는 이 결정이 막지 않는다. 워커는 원격에 쓰지 않는다. push, PR, 병합은 데브가 한다. 워커에게 Bash를 주지 않는다. 조회와 차이도 주지 않는다. 읽기와 파일 쓰기는 Claude Code의 Read, Edit, Write로 한다. 코드 실행과 커밋은 워커에게 주지 않는다. Claude Code 2.1.317에서 `--allowedTools`는 허용 규칙이고, 그 값이 비어도 기본 도구가 열린다. Bash는 그 기본 도구에 들어 있으므로 `--disallowedTools Bash`로 뺀다. 쓸 수 있는 도구는 `--tools Read,Edit,Write`로 둔다.
+워커가 노트에서 쓸 수 있는 곳은 결과 칸뿐이다. 작업 폴더의 코드는 이 결정이 막지 않는다. 워커는 원격에 쓰지 않는다. push, PR, 병합은 데브가 한다. 워커에게 Bash를 주지 않는다. 조회와 차이도 주지 않는다. 읽기와 파일 쓰기는 Claude Code의 Read, Edit, Write로 한다. 코드 실행과 커밋은 워커에게 주지 않는다. 띄울 때 `--restricted --strict-mcp-config`를 넣는다. `--mcp-config`는 넣지 않는다. `--strict-mcp-config`만 두면 사용자 설정의 MCP는 열리지 않고, 넘긴 서버도 없으므로 MCP가 없다. `--restricted`는 명령과 코드를 실행하는 내장 도구와 WebFetch를 `--tools`가 이름으로 부르지 않는 한 없애고, 파일 도구를 작업 디렉터리 안으로 가둔다. `--tools`는 `Read,Edit,Write`다. `--permission-prompts none`이라 작업 폴더 밖 쓰기와 git 설정 쓰기처럼 사람이 승인해야 하는 요청은 거부된다. bare `Edit`나 `Write` 허용은 작업 디렉터리 밖 경로를 미리 승인하므로 `--allowedTools`에 그 이름을 넣지 않는다. 작업 폴더 안 쓰기는 `--permission-mode acceptEdits`가 받는다. `--disallowedTools Bash`는 `--restricted`와 겹친다. 거부 규칙을 남겨, `--tools`에 Bash가 다시 들어와도 거부가 이기게 한다.
 
 전제는 수거가 워커 폴더에서 검증 코드와 git commit을 돌린다는 것이었다. 그 전제는 틀렸다. 워커는 결과 칸만 쓰므로, 워커 쪽에는 검증하거나 커밋할 코드 변경이 없다. 수거는 워커 폴더에서 아무것도 실행하지 않고 결과 한 줄만 읽는다. 기록과 커밋은 신뢰하는 저장소에서 한다. 결과 칸 밖의 변경은 실행 없이 거부한다.
 
-워커는 새 세션으로 띄운다. 비교하기 전에 그 세션 그룹에 살아 있는 프로세스가 하나라도 있으면 대기로 두고 읽지 않는다. 멈출 때와 폴더를 지울 때는 그룹 전체를 끝낸다. 워커가 새 세션을 만들어 그룹 밖으로 빠지는 실행은 두지 않는다. Bash가 없으므로 `setsid`나 `diff.external`을 띄울 수 없다. 해시는 lstat로만 뜬다. 시작 때 없던 심볼릭 링크가 생기거나 링크 대상이 바뀌면 문제다. result.md는 일반 파일일 때만 읽고, 링크면 문제다. 읽을 때 링크를 따라가지 않는다. 수거는 워커 폴더에 쓰지 않는다.
+워커는 새 세션으로 띄운다. 끝인지 대기인지는 한 곳에서만 판단한다. 종료 파일이 있고 세션 그룹이 비었으면 끝이다. 그룹에 살아 있는 프로세스가 있으면 대기이고, 그때는 결과 줄을 읽지 않는다. 종료 파일이 없고 그룹이 살아 있으면 진행이다. poll과 수거가 그 판단을 같이 쓴다. 멈출 때와 폴더를 지울 때는 셸에서 `kill -TERM -<pid>`로 그룹 전체를 끝낸다. pid는 핸들에 적힌 세션 리더다. 워커가 새 세션을 만들어 그룹 밖으로 빠지는 실행은 두지 않는다. Bash가 없으므로 `setsid`나 `diff.external`을 띄울 수 없다. 해시는 lstat로만 뜬다. 작업 폴더와 함께 공통 gitdir의 `config`, `info/attributes`, `hooks/`를 시작 때 파이썬으로만 떠 둔다. 거둘 때 그것이 바뀌면 문제다. 시작 때 없던 심볼릭 링크가 생기거나 링크 대상이 바뀌면 문제다. result.md는 일반 파일일 때만 읽고, 링크면 문제다. 읽을 때 링크를 따라가지 않는다. 수거는 워커 폴더에 쓰지 않는다.
 
-기록과 커밋은 사람이 신뢰하는 저장소, 곧 노트 루트에서 한다. `python3 scripts/orchestrator.py collect --handle <핸들>`이 돌려준 `line`이 결과 줄이다. `state`가 `성공`이면 그 줄을 노트 루트 `.team/sessions/<작업ID>/result.md`의 `## 결과` 다음 첫 줄로 넣는다. 같은 저장소에서 `git add .team/sessions/<작업ID>/result.md` 뒤에 `git commit`으로 담는다. 워커 폴더에서는 git을 돌리지 않는다. 워커를 멈출 때는 핸들의 pid, 곧 세션 리더에 `kill -TERM -<pid>`를 보낸다. 그룹에 프로세스가 없을 때 노트 루트에서 `git worktree remove --force ../dam-<작업ID>`로 워커 폴더를 지우고, `git branch -D worker/<작업ID>`로 브랜치를 지운다.
+기록과 커밋은 사람이 신뢰하는 저장소, 곧 노트 루트에서 한다. `python3 scripts/orchestrator.py collect --handle <핸들>`이 돌려준 `line`이 결과 줄이다. `state`가 `성공`일 때만 그 줄을 노트 루트 `.team/sessions/<작업ID>/result.md`의 `## 결과` 다음 첫 줄로 넣고, 같은 저장소에서 다음만 실행한다. `git -c core.hooksPath=/dev/null -c core.fsmonitor=false add -- .team/sessions/<작업ID>/result.md` 뒤에 `git commit`으로 담는다. `성공`이 아니면 이 git을 돌리지 않는다. 워커 폴더에서는 git을 돌리지 않는다. 그룹에 프로세스가 없을 때 노트 루트에서 `git worktree remove --force ../dam-<작업ID>`로 워커 폴더를 지우고, `git branch -D worker/<작업ID>`로 브랜치를 지운다.
 
 결과 칸은 `.team/sessions/<작업ID>/result.md`의 `## 결과` 제목 다음 줄부터, 다음 `## ` 제목 직전까지다. 제목 줄 자체와 `## 교훈 후보` 같은 다른 절은 결과 칸이 아니다.
 

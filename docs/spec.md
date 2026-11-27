@@ -10,7 +10,7 @@
 
 기본 구현은 github다. 호출은 사람이 이미 로그인한 gh CLI의 읽기다. 선택 결과는 `.team/adapters.lock`의 `issue-tracker` 키이고, 파일이 없으면 github다. 그 파일에 토큰을 적지 않는다. GitHub 명령은 `scripts/issue_tracker.py`에만 둔다. 쓰는 동작의 진입점도 그 파일이고, 사람이 그 동작을 직접 명령했을 때 호출한다. ADR 0007 조건 안의 워커가 호출하는 것은 그 결정이 허용한 동작뿐이다. 이 저장소의 작업 시작 명령은 읽기만 한다.
 
-결정은 `docs/adr/0004-m3-scope.md`와 `docs/adr/0005-adapter-choice.md`다. CI와 머지 규칙은 `docs/adr/0003-ci-and-merge.md`다. 워커의 쓰기와 머지는 `docs/adr/0007-worker-github-write-and-merge.md`다. 워커가 노트에서 쓸 수 있는 곳은 결과 칸뿐이고, 넘기는 글은 맡은 단위뿐인 결정은 `docs/adr/0009-worker-result-section.md`다. 워커는 원격에 쓰지 않고, push, PR, 병합은 데브가 한다. 워커에게 Bash를 주지 않는다. 읽기와 파일 쓰기는 Read, Edit, Write뿐이다. 결과 칸 밖의 변경은 실행 없이 거부한다. 수거는 워커 폴더에서 아무것도 실행하지 않고 결과 한 줄만 읽는다. 그 줄은 사람이 노트 루트의 `.team/sessions/<작업ID>/result.md`에 넣고, 그 저장소에서 커밋한다. 워커 폴더는 세션 그룹을 끝낸 뒤에 `git worktree remove`로 지운다. 절차는 `docs/adr/0009-worker-result-section.md`다.
+결정은 `docs/adr/0004-m3-scope.md`와 `docs/adr/0005-adapter-choice.md`다. CI와 머지 규칙은 `docs/adr/0003-ci-and-merge.md`다. 워커의 쓰기와 머지는 `docs/adr/0007-worker-github-write-and-merge.md`다. 워커가 노트에서 쓸 수 있는 곳은 결과 칸뿐이고, 넘기는 글은 맡은 단위뿐인 결정은 `docs/adr/0009-worker-result-section.md`다. 워커는 원격에 쓰지 않고, push, PR, 병합은 데브가 한다. 워커에게 Bash와 MCP를 주지 않는다. `--restricted --strict-mcp-config`를 넣고 `--mcp-config`는 넣지 않는다. 읽기와 파일 쓰기는 Read, Edit, Write뿐이고, bare 허용으로 작업 폴더 밖을 열지 않는다. 결과 칸 밖의 변경은 실행 없이 거부한다. 공통 gitdir 설정이 바뀌면 문제다. 수거는 세션 그룹이 비었을 때만 결과 한 줄을 읽는다. `성공`일 때만 사람이 노트 루트에서 그 결과 파일 하나만 `git add`하고 커밋한다. 워커 폴더는 그룹을 끝낸 뒤에 `git worktree remove`로 지운다. 절차는 `docs/adr/0009-worker-result-section.md`다.
 
 ## 모드
 
