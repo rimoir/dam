@@ -38,11 +38,25 @@ HANDLE = re.compile(r"^(native|fake)-[0-9]+$")
 WORKER_LIMIT = 3  # 임시. 측정 뒤 고친다.
 STALL_LIMIT_SECONDS = 900  # 임시. 측정 뒤 고친다.
 MAX_TURNS = 40  # 임시. 측정 뒤 고친다.
-# 작업 폴더 안 로컬 작업만. 원격과 GitHub 도구는 없다. ADR 0009.
-ALLOWED_TOOLS = (
-    "Bash(git status *) Bash(git diff *) Bash(git add *) Bash(git commit *) "
-    "Bash(python3 scripts/*)"
+# 훅을 끄고 인자 와일드카드는 없다. 검증 명령만 그 뒤에 붙인다. ADR 0009.
+_LOCAL_TOOLS = (
+    "Bash(git -c core.hooksPath=/dev/null status)",
+    "Bash(git -c core.hooksPath=/dev/null diff)",
+    "Bash(git -c core.hooksPath=/dev/null add .)",
+    "Bash(git -c core.hooksPath=/dev/null commit)",
 )
+_REMOTE_MARK = (
+    "team-session.py",
+    "issue_tracker.py",
+    "gh",
+    "git push",
+    "curl",
+    "wget",
+    "ssh",
+    "http://",
+    "https://",
+)
+_SHELL_MARK = set(";|&$`><\n*")
 _NOTE_SUFFIXES = {".md", ".txt", ".json"}
 
 
@@ -373,7 +387,43 @@ def _restore_guard(loaded: dict[str, str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(changed))
 
 
-def _launch_claude(root: Path, handle: str, unit: str, cwd: Path) -> tuple[int, str] | str | None:
+def verification_problem(command: str) -> str:
+    text = command.strip()
+    if not text:
+        return "검증 명령이 없다"
+    if any(mark in text for mark in _SHELL_MARK):
+        return "검증 명령이 원격에 닿는다"
+    lowered = text.lower()
+    for mark in _REMOTE_MARK:
+        if mark in lowered:
+            return "검증 명령이 원격에 닿는다"
+    return ""
+
+
+def unit_check(root: Path, unit: str) -> str:
+    owner = work_owning_unit(root, unit)
+    if not owner or owner == "*":
+        return ""
+    task = root / ".team" / "sessions" / owner / "task.md"
+    if not task.is_file():
+        return ""
+    try:
+        units = read_plan_units(task.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError):
+        return ""
+    for name, _dep, _files, check in units:
+        if name == unit:
+            return check
+    return ""
+
+
+def allowed_tools(command: str) -> str:
+    return " ".join((*_LOCAL_TOOLS, f"Bash({command.strip()})"))
+
+
+def _launch_claude(
+    root: Path, handle: str, unit: str, cwd: Path, tools: str
+) -> tuple[int, str] | str | None:
     binary = resolve_claude()
     if binary is None:
         return None
@@ -418,7 +468,7 @@ def _launch_claude(root: Path, handle: str, unit: str, cwd: Path) -> tuple[int, 
                 "--max-turns",
                 str(MAX_TURNS),
                 "--allowedTools",
-                ALLOWED_TOOLS,
+                tools,
             ],
             cwd=cwd,
             env=env,
@@ -598,6 +648,12 @@ def start(root: Path, unit: str) -> dict[str, str]:
         problem = claude_problem()
         if problem:
             return blank(ok="아니오", state="거부", reason=problem)
+        check = unit_check(root, unit)
+        blocked = verification_problem(check)
+        if blocked:
+            return blank(ok="아니오", state="거부", reason=blocked)
+    else:
+        check = ""
     folder = _store(root)
     number = 1 + sum(1 for _found in folder.glob(f"{name}-*.json"))
     record = blank(ok="예", handle=f"{name}-{number}", state="대기")
@@ -610,7 +666,9 @@ def start(root: Path, unit: str) -> dict[str, str]:
             ensure_ascii=False,
         )
     if name == "native":
-        launched = _launch_claude(root, record["handle"], unit, cwd)
+        launched = _launch_claude(
+            root, record["handle"], unit, cwd, allowed_tools(check)
+        )
         if isinstance(launched, str):
             return blank(ok="아니오", state="거부", reason=launched)
         if launched is not None:

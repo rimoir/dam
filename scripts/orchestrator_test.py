@@ -321,7 +321,14 @@ class ClaudeLaunchTest(unittest.TestCase):
         for piece in ("git push", "gh pr create", "gh pr comment", "gh pr merge"):
             self.assertNotIn(piece, argv)
         self.assertNotIn("gh ", argv)
-        for piece in ("git status", "git diff", "git add", "git commit", "python3 scripts"):
+        for piece in (
+            "core.hooksPath=/dev/null",
+            "status)",
+            "diff)",
+            "add .)",
+            "commit)",
+            "python3 scripts/orchestrator_test.py)",
+        ):
             self.assertIn(piece, argv)
         self.assertFalse((self.root / "codex-ran.txt").exists())
         self.assertTrue((dest / "result.md").is_file())
