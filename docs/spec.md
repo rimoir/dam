@@ -10,7 +10,7 @@
 
 기본 구현은 github다. 호출은 사람이 이미 로그인한 gh CLI의 읽기다. 선택 결과는 `.team/adapters.lock`의 `issue-tracker` 키이고, 파일이 없으면 github다. 그 파일에 토큰을 적지 않는다. GitHub 명령은 `scripts/issue_tracker.py`에만 둔다. 쓰는 동작의 진입점도 그 파일이고, 사람이 그 동작을 직접 명령했을 때 호출한다. ADR 0007 조건 안의 워커가 호출하는 것은 그 결정이 허용한 동작뿐이다. 이 저장소의 작업 시작 명령은 읽기만 한다.
 
-결정은 `docs/adr/0004-m3-scope.md`와 `docs/adr/0005-adapter-choice.md`다. CI와 머지 규칙은 `docs/adr/0003-ci-and-merge.md`다. 워커의 쓰기와 머지는 `docs/adr/0007-worker-github-write-and-merge.md`다. 워커가 노트에서 쓸 수 있는 곳은 결과 칸뿐이고, 넘기는 글은 맡은 단위뿐인 결정은 `docs/adr/0009-worker-result-section.md`다. 워커는 원격에 쓰지 않고, push, PR, 병합은 데브가 한다.
+결정은 `docs/adr/0004-m3-scope.md`와 `docs/adr/0005-adapter-choice.md`다. CI와 머지 규칙은 `docs/adr/0003-ci-and-merge.md`다. 워커의 쓰기와 머지는 `docs/adr/0007-worker-github-write-and-merge.md`다. 워커가 노트에서 쓸 수 있는 곳은 결과 칸뿐이고, 넘기는 글은 맡은 단위뿐인 결정은 `docs/adr/0009-worker-result-section.md`다. 워커는 원격에 쓰지 않고, push, PR, 병합은 데브가 한다. 워커 허용 도구는 로컬 명령과 단위 검증 명령만 둔다.
 
 ## 모드
 
