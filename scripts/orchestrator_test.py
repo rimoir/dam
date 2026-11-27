@@ -719,5 +719,37 @@ class ParallelBoardTest(unittest.TestCase):
         self.assertEqual(text, context.SHORTEN_LINE)
 
 
+class ProbeStepsTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        install_marker(self.root, "claude")
+        install_marker(self.root, "codex")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_probe_steps_print_and_do_not_launch(self) -> None:
+        done = run_orch(self.root, "probe-steps")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        for phrase in (
+            "버전과 로그인",
+            "시험용 작업 폴더",
+            "Claude Code 읽기 전용",
+            "세션 재개",
+            "Codex 읽기 전용",
+            "커밋",
+            "시작 시간",
+            "정리",
+            "실행하지 않는다",
+            "결과: 아직 없음",
+        ):
+            self.assertIn(phrase, done.stdout)
+        self.assertFalse((self.root / "marker.txt").exists())
+        doc = (ROOT / "docs" / "milestones" / "m5b-hr-p-check.md").read_text(encoding="utf-8")
+        self.assertIn("결과: 아직 없음", doc)
+        self.assertIn("샌드박스를 끄지 않는다", doc)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -550,6 +550,7 @@ def main(argv: list[str] | None = None) -> int:
     parallel_cmd = sub.add_parser("parallel", help="현황판에 마지막 로그 시각을 적는다.")
     parallel_cmd.add_argument("--work", required=True)
     resume_cmd = sub.add_parser("resume-parallel", help="현황판과 상태 파일만으로 줄을 다시 읽는다.")
+    sub.add_parser("probe-steps", help="HR P PC 확인 절차를 인쇄만 한다.")
     poll_cmd = sub.add_parser("poll", help="핸들의 상태를 읽는다.")
     poll_cmd.add_argument("--handle", required=True)
     collect_cmd = sub.add_parser("collect", help="결과 한 줄을 읽는다.")
@@ -594,6 +595,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "brief":
             text = worker_brief(root, args.work)
             sys.stdout.write(text if text.endswith("\n") else text + "\n")
+            return 0
+        elif args.command == "probe-steps":
+            path = Path(__file__).resolve().parents[1] / "docs" / "milestones" / "m5b-hr-p-check.md"
+            sys.stdout.write(path.read_text(encoding="utf-8"))
+            sys.stdout.write("이 명령은 도구를 실행하지 않는다.\n")
             return 0
         elif args.command == "parallel":
             record = record_parallel(root, args.work)
