@@ -6,9 +6,11 @@ import json
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -2835,6 +2837,150 @@ class DisposableCheckTest(unittest.TestCase):
         self.assertEqual(state, "검증 실패")
         self.assertNotIn("NEW_BODY", reason)
         self.assertIn("바뀌었", reason)
+
+    def _module(self):
+        spec = importlib.util.spec_from_file_location("orch_under_test", SCRIPT)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _pids_with(self, token: str) -> list[int]:
+        found: list[int] = []
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                raw = (entry / "cmdline").read_bytes().replace(b"\x00", b" ")
+            except OSError:
+                continue
+            if token.encode() in raw:
+                found.append(int(entry.name))
+        return found
+
+    def _reap(self, token: str) -> None:
+        for pid in self._pids_with(token):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+    def test_host_paths_and_sockets_stay_closed(self) -> None:
+        name = self.root.name
+        paths = {
+            "shm": Path(f"/dev/shm/orch-wrote-{name}"),
+            "tmp": Path(f"/tmp/orch-wrote-{name}"),
+            "run": Path(f"/run/orch-wrote-{name}"),
+            "vartmp": Path(f"/var/tmp/orch-wrote-{name}"),
+        }
+        socks = [Path(f"/dev/shm/orch-sock-{name}"), Path(f"/var/tmp/orch-sock-{name}")]
+        got: list[bytes] = []
+
+        def serve(path: Path) -> None:
+            if path.exists():
+                path.unlink()
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            server.bind(str(path))
+            os.chmod(path, 0o777)
+            server.listen(1)
+            server.settimeout(8)
+            try:
+                client, _addr = server.accept()
+                got.append(client.recv(64))
+                client.close()
+            except OSError:
+                pass
+            finally:
+                server.close()
+
+        threads = [threading.Thread(target=serve, args=(path,), daemon=True) for path in socks]
+        for thread in threads:
+            thread.start()
+        time.sleep(0.1)
+        body = (
+            "import pathlib, socket\n"
+            f"paths = {[str(path) for path in paths.values()]!r}\n"
+            "for path in paths:\n"
+            "    try:\n"
+            "        pathlib.Path(path).write_text('pwned')\n"
+            "        print('WROTE', path)\n"
+            "    except Exception as exc:\n"
+            "        print('NOW', path, type(exc).__name__)\n"
+            f"for path in {[str(path) for path in socks]!r}:\n"
+            "    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+            "    client.settimeout(2)\n"
+            "    try:\n"
+            "        client.connect(path)\n"
+            "        client.send(b'FROM-SANDBOX')\n"
+            "        print('SOCK_OK', path)\n"
+            "    except Exception as exc:\n"
+            "        print('SOCK_FAIL', path, type(exc).__name__)\n"
+            "    finally:\n"
+            "        client.close()\n"
+            "raise SystemExit(0)\n"
+        )
+        dest = self.root / "repo"
+        dest.mkdir()
+        (dest / "scripts").mkdir()
+        (dest / "scripts" / "check.py").write_text(body, encoding="utf-8")
+        module = self._module()
+        try:
+            module.run_disposable_check(
+                dest, "python3 scripts/check.py", "", module.snapshot_tree(dest)
+            )
+            for thread in threads:
+                thread.join(timeout=2)
+            self.assertEqual(got, [])
+            for path in paths.values():
+                self.assertFalse(path.exists(), str(path))
+        finally:
+            for path in list(paths.values()) + socks:
+                if path.exists():
+                    path.unlink()
+
+    def test_escaped_processes_are_gone_when_check_returns(self) -> None:
+        token = f"orch-escape-{self.root.name}"
+        late = Path(f"/dev/shm/orch-late-{token}")
+        body = (
+            "import os, time\n"
+            f"token = {token!r}\n"
+            f"late = {str(late)!r}\n"
+            "def launch(code, use_nohup):\n"
+            "    if os.fork() == 0:\n"
+            "        os.setsid()\n"
+            "        if os.fork() == 0:\n"
+            "            null = os.open('/dev/null', os.O_RDWR)\n"
+            "            os.dup2(null, 0)\n"
+            "            os.dup2(null, 1)\n"
+            "            os.dup2(null, 2)\n"
+            "            argv = ['python3', '-c', code]\n"
+            "            if use_nohup:\n"
+            "                argv = ['nohup'] + argv\n"
+            "            os.execvp(argv[0], argv)\n"
+            "        os._exit(0)\n"
+            "    os.wait()\n"
+            "linger = 'import time; time.sleep(0.5); open(%r, \"w\").write(\"late\"); time.sleep(60)' % late\n"
+            "launch(linger + '  # ' + token + '-setsid', False)\n"
+            "launch(linger + '  # ' + token + '-nohup', True)\n"
+            "os._exit(0)\n"
+        )
+        dest = self.root / "escape"
+        dest.mkdir()
+        (dest / "scripts").mkdir()
+        (dest / "scripts" / "check.py").write_text(body, encoding="utf-8")
+        module = self._module()
+        try:
+            state, reason = module.run_disposable_check(
+                dest, "python3 scripts/check.py", "", module.snapshot_tree(dest)
+            )
+            time.sleep(0.8)
+            if not (state == "검증 실패" and reason == "네트워크를 막을 수 없다"):
+                self.assertFalse(late.exists(), "escaped process wrote after return")
+                self.assertEqual(self._pids_with(token), [])
+        finally:
+            self._reap(token)
+            if late.exists():
+                late.unlink()
 
 
 if __name__ == "__main__":
