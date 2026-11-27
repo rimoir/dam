@@ -6,7 +6,7 @@
 
 검증은 최소 루트에서 돈다. 호스트 소켓과 `/dev/shm`는 보이지 않고, 빠져나간 프로세스는 init과 함께 끝난다. 실제 모델은 부르지 않았다.
 
-시작 시간. 데브 박스의 실제 Claude Code 2.1.317, head `3ad4eeaff3ad7d5a9c0aedc4b58ce67f490f4dda`에서 orchestrator start의 단위는 `Claude 시작`이다. 명령부터 첫 stream-json 이벤트(system/init)까지 5회는 0.315, 0.315, 0.312, 0.420, 0.335초다. 정렬하면 0.312, 0.315, 0.315, 0.335, 0.420초이고 중간값은 0.315초다. 기준 15초 이하다. 출처는 https://github.com/rimoir/dam/issues/78#issuecomment-7210578911 이다. Codex는 HR P PC에서 #77 Codex 단계와 함께 측정 예정, 미측정이다.
+시작 시간. 데브 박스의 실제 Claude Code 2.1.317, head `3ad4eeaff3ad7d5a9c0aedc4b58ce67f490f4dda`에서 orchestrator start의 단위는 `Claude 시작`이다. 명령부터 첫 stream-json 이벤트(system/init)까지 5회는 0.315, 0.315, 0.312, 0.420, 0.335초다. 정렬하면 0.312, 0.315, 0.315, 0.335, 0.420초이고 중간값은 0.315초다. 기준 15초 이하다. 출처는 https://github.com/rimoir/dam/issues/78#issuecomment-7210578911 이다. Codex 시작 5회와 HR P PC 확인은 https://github.com/rimoir/dam/issues/139 로 옮겼다. 이쪽에서는 아직 한 번도 돌리지 않았다.
 
 ## 교훈 후보
 

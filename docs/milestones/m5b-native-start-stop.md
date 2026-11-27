@@ -4,7 +4,7 @@ native 시작은 PATH의 `claude`를 비대화형으로 띄운다. Codex는 미�
 
 ## 아직 비어 있는 것
 
-`docs/milestones/m5b-hr-p-check.md`의 결과 칸은 모두 `결과: 아직 없음`이다. 공용 박스에서 본 Claude 확인은 그 칸을 채우지 않는다. Claude 시작 시간 중간값은 `.team/sessions/78/result.md`에 있다. Codex 칸은 미측정이다. 실제 Claude 호출은 사람이 박스에서 따로 한다.
+`docs/milestones/m5b-hr-p-check.md`의 결과 칸은 모두 `결과: 아직 없음`이다. 그 칸과 Codex 단계, Codex 시작 5회는 https://github.com/rimoir/dam/issues/139 에서 채운다. Claude 시작 시간 중간값은 `.team/sessions/78/result.md`에 있다.
 
 ## 보안 경계는 그대로 둔다
 
@@ -31,4 +31,4 @@ Codex가 작업 폴더 커밋을 막는지는 아직 모른다. 샌드박스를 
 
 ## 하지 않은 것
 
-Codex를 띄우는 코드는 없다. Claude 시작 시간 중간값은 `.team/sessions/78/result.md`에 있고, Codex는 미측정이다. HR P PC 결과 칸은 비어 있다.
+Codex를 띄우는 코드는 없다. Claude 시작 시간 중간값은 `.team/sessions/78/result.md`에 있다. Codex 단계와 HR P PC 확인은 https://github.com/rimoir/dam/issues/139 다.

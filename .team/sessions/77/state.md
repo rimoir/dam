@@ -4,7 +4,7 @@
 
 ## 지금 상태
 
-절차와 빈 결과 칸만 있다. HR P PC에서 아직 돌리지 않았다.
+절차와 빈 결과 칸만 있다. Codex 단계와 HR P PC 확인은 #139다.
 
 ## 결정
 
@@ -15,4 +15,4 @@
 
 ## 다음 할 일
 
-HR P가 PC에서 7단계를 돌리고 결과 칸을 채운다.
+Codex 단계와 HR P PC 확인은 https://github.com/rimoir/dam/issues/139 에서 한다.

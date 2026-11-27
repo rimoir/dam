@@ -31,3 +31,5 @@
 ## 이유
 
 워커가 결정 줄과 승인 줄을 직접 쓰면, 시작 허용이 그 줄을 읽어 다음 단위를 스스로 열 수 있다. 결과 칸만 받고, 노트 루트의 그 줄을 되돌리면 그 길이 막힌다. 수거가 워커 폴더의 코드나 git을 돌리면, 결과 칸 밖에 심어 둔 설정과 파일이 실행된다. 실행할 변경이 없으므로 그 실행을 두지 않는다. `git diff`의 `diff.external`도 같은 실행이다. Bash를 빼면 그 프로그램과 새 세션으로 빠지는 실행이 생기지 않는다. 그래서 단위 검증을 돌릴 주체가 없어졌고, 워커는 통과를 주장만 하게 됐다. 검증은 신뢰 쪽이 검사한 작업 폴더의 일회용 복사본에서 돌리고, 그 결과만 상태로 보인다. 막을 경로를 나열하면 빠뜨린 소켓과 `/dev/shm`로 호스트와 통하고, 세션을 벗어난 프로세스는 그룹이 끝나도 남는다. 그래서 보이는 경로를 허용한 것만 두고, 프로세스 수명은 PID namespace의 init에 묶는다.
+
+2026-11-27 23:03 KST에 HR P가 범위를 나눴다. 원문: "먼저 머지해. Codex 단계와 내 PC 확인은 새 이슈로 빼서 나중에 할게". Codex 단계, Codex 시작 5회, HR P PC 확인은 https://github.com/rimoir/dam/issues/139 다. 옮긴 기록은 https://github.com/rimoir/dam/issues/77#issuecomment-7220389936 과 https://github.com/rimoir/dam/issues/78#issuecomment-7220390598 이다. 근거로 쓴 박스 증거는 https://github.com/rimoir/dam/issues/78#issuecomment-7214450877 이고, head `19cde8a` 독립 검토 https://github.com/rimoir/dam/pull/111#issuecomment-7213850860 은 병합을 막는 지적이 없었다. 남은 위험은 Codex 쪽을 아직 한 번도 돌리지 않았다는 것이다.
