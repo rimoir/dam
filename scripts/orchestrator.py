@@ -158,14 +158,37 @@ def _inside(child: Path, parent: Path) -> bool:
     return True
 
 
+def _binary_problem(path: Path) -> str:
+    if not path.is_file():
+        return "실행 파일이 없다"
+    if not os.access(path, os.X_OK):
+        return "실행할 수 없다"
+    return ""
+
+
+def claude_problem() -> str:
+    explicit = os.environ.get("ORCH_CLAUDE", "").strip()
+    if explicit == "-":
+        return ""
+    if explicit:
+        return _binary_problem(Path(explicit))
+    found = shutil.which("claude")
+    if not found:
+        return "실행 파일이 없다"
+    return _binary_problem(Path(found))
+
+
 def resolve_claude() -> str | None:
     explicit = os.environ.get("ORCH_CLAUDE", "").strip()
     if explicit == "-":
         return None
     if explicit:
         path = Path(explicit)
-        return str(path) if path.is_file() else None
-    return shutil.which("claude")
+        return str(path) if not _binary_problem(path) else None
+    found = shutil.which("claude")
+    if found and not _binary_problem(Path(found)):
+        return found
+    return None
 
 
 def worker_cwd(root: Path, unit: str) -> Path | str:
@@ -571,6 +594,10 @@ def start(root: Path, unit: str) -> dict[str, str]:
     cwd = worker_cwd(root, unit)
     if isinstance(cwd, str):
         return blank(ok="아니오", state="거부", reason=cwd)
+    if name == "native":
+        problem = claude_problem()
+        if problem:
+            return blank(ok="아니오", state="거부", reason=problem)
     folder = _store(root)
     number = 1 + sum(1 for _found in folder.glob(f"{name}-*.json"))
     record = blank(ok="예", handle=f"{name}-{number}", state="대기")
