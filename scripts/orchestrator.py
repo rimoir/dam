@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import select
 import shlex
 import shutil
 import signal
@@ -1008,114 +1009,196 @@ def _problem(root: Path, loaded: dict[str, str], handle: str, reason: str) -> di
     return record
 
 
-def _overlay_result(cwd: Path, owner: str, copy: Path) -> None:
-    if not owner or owner == "*":
-        return
-    src = cwd / ".team" / "sessions" / owner / "result.md"
+def _read_bytes(path: Path) -> bytes | None:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        info = src.lstat()
+        fd = os.open(path, flags)
     except OSError:
-        return
-    if not stat.S_ISREG(info.st_mode):
-        return
-    text = _read_regular(src)
-    if text is None:
-        return
-    dest = copy / ".team" / "sessions" / owner / "result.md"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(text, encoding="utf-8")
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
 
 
-def _isolate_script(real_home: str, empty_home: str, tmp_dir: str) -> str:
+def _write_bytes(path: Path, data: bytes) -> bool:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags, 0o644)
+    except OSError:
+        return False
+    try:
+        os.write(fd, data)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
+def _copyable(rel: str) -> bool:
+    if not rel or rel.startswith("/") or rel.startswith("gitdir/") or rel.startswith("common/"):
+        return False
+    parts = PurePosixPath(rel).parts
+    if ".." in parts or rel == ".git" or rel.startswith(".git/"):
+        return False
+    return True
+
+
+def materialize_snapshot(cwd: Path, snapshot: dict[str, str], dest: Path) -> str | None:
+    """검사한 작업 폴더만 복사한다. 해시가 달라지면 이유를 돌려준다."""
+    for rel, digest in snapshot.items():
+        if not _copyable(rel):
+            continue
+        src = cwd / rel
+        if _fingerprint(src) != digest:
+            return "검사한 내용이 바뀌었다"
+        target = dest / rel
+        if digest.startswith("link:"):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.symlink(digest[len("link:") :], target)
+            except OSError:
+                return "검사한 내용이 바뀌었다"
+            continue
+        if not digest:
+            continue
+        data = _read_bytes(src)
+        if data is None or hashlib.sha256(data).hexdigest() != digest:
+            return "검사한 내용이 바뀌었다"
+        if not _write_bytes(target, data):
+            return "검사한 내용이 바뀌었다"
+    if snapshot_tree(cwd) != snapshot:
+        return "검사한 내용이 바뀌었다"
+    return None
+
+
+def _isolate_script(real_home: str, ready_fd: int) -> str:
     home = shlex.quote(real_home)
     root_home = shlex.quote("/root")
-    empty = shlex.quote(empty_home)
-    temp = shlex.quote(tmp_dir)
     return (
         "#!/bin/sh\n"
+        "set -e\n"
+        "copy=$1\n"
+        "shift\n"
+        "mount --make-rprivate / || exit 77\n"
         f"mount -t tmpfs tmpfs {home} || exit 78\n"
         f"if [ -d {root_home} ]; then mount -t tmpfs tmpfs {root_home} || exit 78; fi\n"
-        f"exec env -i PATH=/usr/bin:/bin HOME={empty} TMPDIR={temp} \"$@\"\n"
+        "mount -t tmpfs tmpfs /mnt || exit 79\n"
+        "mkdir -p /mnt/copy\n"
+        'mount --bind "$copy" /mnt/copy || exit 79\n'
+        "cd /mnt/copy || exit 79\n"
+        "mount -t tmpfs tmpfs /tmp || exit 79\n"
+        "mount -o remount,bind,ro / || exit 80\n"
+        "mount -o remount,bind,rw /mnt/copy || exit 80\n"
+        f"printf r >&{ready_fd} || exit 81\n"
+        f"exec {ready_fd}>&-\n"
+        "exec unshare -U --map-root-user setpriv --no-new-privs --inh-caps=-all "
+        "--bounding-set=-all -- env -i PATH=/usr/bin:/bin HOME=/mnt/copy/empty-home "
+        'TMPDIR=/tmp "$@"\n'
     )
 
 
-def run_disposable_check(cwd: Path, command: str, owner: str) -> tuple[str, str]:
-    text = command.strip()
-    if not text or "\x00" in text:
-        return "검증 실패", "검증 명령이 없다"
-    if shutil.which("unshare") is None or shutil.which("timeout") is None:
-        return "검증 실패", "네트워크를 막을 수 없다"
-    probe = subprocess.run(
-        ["unshare", "-rmn", "true"],
+def _locked_command(copy: Path, command: str) -> tuple[int, str, str]:
+    """마운트를 잠근 뒤에만 명령을 돌린다. 준비에 실패하면 음수 코드."""
+    read_fd, write_fd = os.pipe()
+    os.set_inheritable(write_fd, True)
+    wrapper = copy / "isolate"
+    wrapper.write_text(_isolate_script(str(Path.home()), write_fd), encoding="utf-8")
+    wrapper.chmod(0o755)
+    proc = subprocess.Popen(
+        [
+            "timeout",
+            "-k",
+            "2",
+            "30",
+            "unshare",
+            "-rmn",
+            str(wrapper),
+            str(copy),
+            "sh",
+            "-c",
+            command,
+        ],
+        cwd=copy,
         text=True,
-        capture_output=True,
-        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+        pass_fds=(write_fd,),
     )
-    if probe.returncode != 0:
-        return "검증 실패", "네트워크를 막을 수 없다"
-    copy = Path(tempfile.mkdtemp(prefix="orch-verify-"))
+    os.close(write_fd)
     try:
-        archived = subprocess.run(
-            ["git", "-C", str(cwd), "archive", "--format=tar", "HEAD"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if archived.returncode != 0 or not archived.stdout:
-            return "검증 실패", "커밋 트리를 꺼내지 못했다"
-        extracted = subprocess.run(
-            ["tar", "-x", "-C", str(copy)],
-            input=archived.stdout,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if extracted.returncode != 0:
-            return "검증 실패", "커밋 트리를 꺼내지 못했다"
-        _overlay_result(cwd, owner, copy)
-        empty_home = copy / "empty-home"
-        empty_tmp = copy / "empty-tmp"
-        empty_home.mkdir()
-        empty_tmp.mkdir()
-        wrapper = copy / "isolate"
-        wrapper.write_text(
-            _isolate_script(str(Path.home()), str(empty_home), str(empty_tmp)),
-            encoding="utf-8",
-        )
-        wrapper.chmod(0o755)
-        proc = subprocess.Popen(
-            [
-                "timeout",
-                "-k",
-                "2",
-                "30",
-                "unshare",
-                "-rmn",
-                str(wrapper),
-                "sh",
-                "-c",
-                text,
-            ],
-            cwd=copy,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
-        )
+        ready, _, _ = select.select([read_fd], [], [], 10)
+        got = os.read(read_fd, 1) if ready else b""
+        if got != b"r":
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+            proc.communicate(timeout=5)
+            return -1, "", ""
         try:
             out, err = proc.communicate(timeout=40)
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid, signal.SIGTERM)
-            out, err = proc.communicate()
-            return "검증 실패", "시간이 다 됐다"
-        code = proc.returncode
-        if code == 78:
-            return "검증 실패", "홈을 가리지 못했다"
+            proc.communicate()
+            return 124, "", ""
+        return proc.returncode or 0, out or "", err or ""
+    finally:
+        os.close(read_fd)
+
+
+def run_disposable_check(
+    cwd: Path,
+    command: str,
+    owner: str = "",
+    snapshot: dict[str, str] | None = None,
+) -> tuple[str, str]:
+    del owner
+    text = command.strip()
+    if not text or "\x00" in text:
+        return "검증 실패", "검증 명령이 없다"
+    if snapshot is None:
+        snapshot = snapshot_tree(cwd)
+    copy = Path(tempfile.mkdtemp(prefix="orch-verify-"))
+    try:
+        problem = materialize_snapshot(cwd, snapshot, copy)
+        if problem:
+            return "검증 실패", problem
+        if shutil.which("unshare") is None or shutil.which("timeout") is None:
+            return "검증 실패", "네트워크를 막을 수 없다"
+        probe = subprocess.run(
+            ["unshare", "-rmn", "true"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if probe.returncode != 0 or shutil.which("setpriv") is None:
+            return "검증 실패", "네트워크를 막을 수 없다" if probe.returncode != 0 else "잠그지 못했다"
+        empty_home = copy / "empty-home"
+        if empty_home.exists() and not empty_home.is_dir():
+            return "검증 실패", "잠그지 못했다"
+        empty_home.mkdir(exist_ok=True)
+        code, out, err = _locked_command(copy, text)
+        if code < 0:
+            return "검증 실패", "잠그지 못했다"
         if code == 124:
             return "검증 실패", "시간이 다 됐다"
         if code == 0:
             return "검증 통과", ""
-        tail = _escape_reason_line((out or "") + (err or ""))
+        tail = _escape_reason_line(out + err)
         return "검증 실패", tail or "검증이 실패했다"
     finally:
         shutil.rmtree(copy, ignore_errors=True)
@@ -1178,7 +1261,10 @@ def collect(root: Path, handle: str) -> dict[str, str]:
     kind = judge(code, line, next_action_updated(_state_text(root, cwd, owner)))
     reason = ""
     if kind == "성공":
-        kind, reason = run_disposable_check(cwd, loaded.get("check", ""), owner)
+        inspected = after if before is not None else snapshot_tree(cwd)
+        kind, reason = run_disposable_check(
+            cwd, loaded.get("check", ""), owner, inspected
+        )
     stamp = _read_regular(_store(root) / f"{handle}.first")
     if stamp and stamp.strip():
         loaded["first_event"] = stamp.strip()
