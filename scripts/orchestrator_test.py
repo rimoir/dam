@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -203,6 +204,89 @@ class AdapterShapeTest(unittest.TestCase):
         done = run_orch(self.root, "start", "--unit", "72")
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("adapters.lock", done.stdout + done.stderr)
+
+
+class ClaudeLaunchTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        bindir = self.root / "bin"
+        bindir.mkdir()
+        (bindir / "claude").write_text(
+            "#!/bin/sh\n"
+            'printf \'%s\\n\' "$*" > "$ORCH_ARGV"\n'
+            'printf \'%s\\n\' "## 결과" "" "PASS 끝" > result.md\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        (bindir / "codex").write_text(
+            "#!/bin/sh\nprintf '%s\\n' ran > \"$ORCH_CODEX\"\nexit 0\n",
+            encoding="utf-8",
+        )
+        for name in ("claude", "codex"):
+            (bindir / name).chmod(0o755)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["ORCH_ARGV"] = str(self.root / "claude-argv.txt")
+        env["ORCH_CODEX"] = str(self.root / "codex-ran.txt")
+        env["PATH"] = str(self.root / "bin") + os.pathsep + env.get("PATH", "")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        return subprocess.run(
+            ["python3", str(SCRIPT), *args],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_start_poll_collect_runs_claude_and_reaps_it(self) -> None:
+        started = self._run("start", "--unit", "검증용")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        parsed = parse_record(started.stdout)
+        self.assertEqual(parsed["ok"], "예")
+        self.assertNotEqual(parsed["state"], "대기")
+        seen = ""
+        for _ in range(40):
+            polled = self._run("poll", "--handle", parsed["handle"])
+            self.assertEqual(polled.returncode, 0, polled.stderr)
+            seen = parse_record(polled.stdout)["state"]
+            if seen == "끝":
+                break
+            time.sleep(0.05)
+        self.assertEqual(seen, "끝")
+        collected = self._run("collect", "--handle", parsed["handle"])
+        self.assertEqual(collected.returncode, 0, collected.stderr)
+        done = parse_record(collected.stdout)
+        self.assertTrue(done["line"].startswith("PASS"))
+        argv = (self.root / "claude-argv.txt").read_text(encoding="utf-8")
+        self.assertIn("--max-turns", argv)
+        self.assertIn("40", argv)
+        self.assertIn("acceptEdits", argv)
+        self.assertNotIn("bypassPermissions", argv)
+        self.assertNotIn("dangerously-skip-permissions", argv)
+        self.assertFalse((self.root / "codex-ran.txt").exists())
+
+    def test_codex_is_not_launched(self) -> None:
+        old = os.environ.get("ORCH_TOOL")
+        os.environ["ORCH_TOOL"] = "codex"
+        try:
+            started = self._run("start", "--unit", "검증용")
+        finally:
+            if old is None:
+                os.environ.pop("ORCH_TOOL", None)
+            else:
+                os.environ["ORCH_TOOL"] = old
+        self.assertNotEqual(started.returncode, 0)
+        parsed = parse_record(started.stdout)
+        self.assertEqual(parsed["state"], "거부")
+        self.assertIn("미검증", parsed["reason"])
+        self.assertFalse((self.root / "claude-argv.txt").exists())
+        self.assertFalse((self.root / "codex-ran.txt").exists())
 
 
 class TrackerRegressionTest(unittest.TestCase):
