@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -1381,6 +1382,31 @@ class VerifyReadonlyTest(unittest.TestCase):
         self.assertEqual(upper.stdout, "실패\n")
         short = self._run("--end", "--snapshot", str(snap), "--expect", "ab")
         self.assertEqual(short.stdout, "실패\n")
+
+    def test_isolated_rewrite_is_not_clean(self) -> None:
+        snap = Path(self.tmp.name + "-snap.json")
+        command = (
+            "printf 'x = 9\\n' > scripts/ok.py; printf hack > "
+            + shlex.quote(str(snap))
+            + " || true"
+        )
+        done = self._run(
+            "--isolated",
+            "--snapshot",
+            str(snap),
+            "--command",
+            command,
+        )
+        self.assertEqual(done.stdout, "실패\n", done.stderr)
+        self.assertNotEqual(done.returncode, 0)
+
+    def test_isolated_visible_snapshot_is_not_clean(self) -> None:
+        snap = self.root / "visible.json"
+        snap.write_text("leak\n", encoding="utf-8")
+        done = self._run("--isolated", "--snapshot", str(snap), "--command", "true")
+        self.assertEqual(done.stdout, "실패\n", done.stderr)
+        self.assertNotEqual(done.returncode, 0)
+        snap.unlink(missing_ok=True)
 
     def test_snapshot_inside_work_is_not_written(self) -> None:
         inside = self.root / "snap.json"
