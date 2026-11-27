@@ -1169,5 +1169,124 @@ class VerifyStartTest(unittest.TestCase):
         self.assertIn("Codex go", done.stdout)
 
 
+EXPECT_HEAD = "c" * 40
+OTHER_HEAD = "d" * 40
+
+
+def verdict_text(kind: str, head: str = EXPECT_HEAD, method: str = "python3 scripts/session_context_test.py", evidence: str = "64개 통과") -> str:
+    return f"{kind}\n헤드 SHA: {head}\n확인 방법: {method}\n증거 요약: {evidence}\n"
+
+
+def run_judge(text: str, head: str = EXPECT_HEAD) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["python3", str(SCRIPT), "verify-judge", "--head", head, "--text", text],
+        text=True,
+        capture_output=True,
+    )
+
+
+class VerifyVerdictTest(unittest.TestCase):
+    def test_pass_with_head_method_and_evidence_is_pass(self) -> None:
+        done = run_judge(verdict_text("PASS"))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "PASS\n")
+
+    def test_issues_is_kept_and_is_not_pass(self) -> None:
+        done = run_judge(verdict_text("ISSUES", evidence="실패 1개"))
+        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(done.stdout, "ISSUES\n")
+
+    def test_blocked_is_kept_and_is_not_pass(self) -> None:
+        done = run_judge(verdict_text("BLOCKED", evidence="명령을 실행하지 못했다"))
+        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(done.stdout, "BLOCKED\n")
+
+    def test_missing_field_or_different_head_is_not_pass(self) -> None:
+        missing_evidence = "PASS\n헤드 SHA: " + EXPECT_HEAD + "\n확인 방법: python3 scripts/session_context_test.py\n"
+        missing_method = "PASS\n헤드 SHA: " + EXPECT_HEAD + "\n증거 요약: 64개 통과\n"
+        missing_head = "PASS\n확인 방법: python3 scripts/session_context_test.py\n증거 요약: 64개 통과\n"
+        empty_evidence = verdict_text("PASS", evidence="  ")
+        cases = (
+            missing_evidence,
+            missing_method,
+            missing_head,
+            empty_evidence,
+            verdict_text("PASS", head=OTHER_HEAD),
+            "pass\n헤드 SHA: " + EXPECT_HEAD + "\n확인 방법: 명령\n증거 요약: 있다\n",
+        )
+        for text in cases:
+            done = run_judge(text)
+            self.assertNotEqual(done.returncode, 0, text)
+            self.assertEqual(done.stdout, "실패\n", text)
+        wrong = run_judge(verdict_text("PASS"), head=OTHER_HEAD)
+        self.assertEqual(wrong.stdout, "실패\n")
+        self.assertNotEqual(wrong.returncode, 0)
+
+    def test_worker_judge_keeps_its_contract(self) -> None:
+        from orchestrator import judge
+
+        self.assertEqual(judge(0, "PASS 했다", True), "성공")
+        self.assertEqual(judge(0, "ISSUES 있다", True), "문제")
+        self.assertEqual(judge(0, "BLOCKED 막힘", True), "문제")
+        self.assertEqual(judge(0, "PASS 했다", False), "미완")
+
+
+class VerifyReadonlyTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        subprocess.run(["git", "init"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=self.root, check=True)
+        script = self.root / "scripts"
+        script.mkdir()
+        (script / "ok.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "scripts/ok.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=self.root, check=True, capture_output=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        return subprocess.run(
+            ["python3", str(SCRIPT), "verify-readonly", *args],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_clean_tree_is_clean(self) -> None:
+        done = self._run()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "깨끗\n")
+
+    def test_code_change_during_verification_fails(self) -> None:
+        before = self.root / "before.txt"
+        before.write_text("", encoding="utf-8")
+        start = self._run("--before", str(before))
+        self.assertEqual(start.stdout, "깨끗\n", start.stderr)
+        (self.root / "scripts" / "ok.py").write_text("x = 2\n", encoding="utf-8")
+        end = self._run("--before", str(before))
+        self.assertNotEqual(end.returncode, 0)
+        self.assertEqual(end.stdout, "실패\n")
+        self.assertIn("scripts/ok.py", end.stderr)
+
+    def test_team_notes_stay_clean_and_a_dirty_start_fails(self) -> None:
+        notes = self.root / ".team" / "sessions" / "80"
+        notes.mkdir(parents=True)
+        (notes / "result.md").write_text("노트\n", encoding="utf-8")
+        done = self._run()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "깨끗\n")
+        before = self.root / "before.txt"
+        before.write_text("scripts/ok.py\n", encoding="utf-8")
+        stale = self._run("--before", str(before))
+        self.assertNotEqual(stale.returncode, 0)
+        self.assertEqual(stale.stdout, "실패\n")
+
+
 if __name__ == "__main__":
     unittest.main()

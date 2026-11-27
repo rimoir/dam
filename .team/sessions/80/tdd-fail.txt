@@ -1,0 +1,5 @@
+verify-judge와 verify-readonly 명령이 없다.
+오류: invalid choice: 'verify-judge'
+오류: invalid choice: 'verify-readonly'
+VerifyVerdictTest와 VerifyReadonlyTest 8개 중 7개 실패.
+워커 judge 계약 1개는 통과.
