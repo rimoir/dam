@@ -248,7 +248,10 @@ class ClaudeLaunchTest(unittest.TestCase):
             "#!/bin/sh\n"
             'printf \'%s\\n\' "$*" > "$ORCH_ARGV"\n'
             'printf \'%s\\n\' \'{"type":"system","subtype":"init"}\'\n'
-            'printf \'%s\\n\' "## 결과" "" "PASS 끝" > result.md\n'
+            'if [ -n "$ORCH_RESULT" ]; then\n'
+            '  mkdir -p "$(dirname "$ORCH_RESULT")"\n'
+            '  printf \'%s\\n\' "## 결과" "" "PASS 끝" > "$ORCH_RESULT"\n'
+            'fi\n'
             "exit 0\n",
             encoding="utf-8",
         )
@@ -290,9 +293,13 @@ class ClaudeLaunchTest(unittest.TestCase):
         (dest / "scripts" / "orchestrator_test.py").write_text(
             "raise SystemExit(0)\n", encoding="utf-8"
         )
+        os.environ["ORCH_RESULT"] = str(
+            dest / ".team" / "sessions" / "780079" / "result.md"
+        )
         try:
             self._assert_reaped(dest)
         finally:
+            os.environ.pop("ORCH_RESULT", None)
             shutil.rmtree(dest, ignore_errors=True)
 
     def _assert_reaped(self, dest: Path) -> None:
@@ -331,7 +338,9 @@ class ClaudeLaunchTest(unittest.TestCase):
         self.assertNotIn("commit", allowed)
         self.assertNotIn("python3", allowed)
         self.assertFalse((self.root / "codex-ran.txt").exists())
-        self.assertTrue((dest / "result.md").is_file())
+        self.assertTrue(
+            (dest / ".team" / "sessions" / "780079" / "result.md").is_file()
+        )
         self.assertFalse((self.root / "result.md").exists())
         self.assertFalse((dest / ".team" / "orchestrator").exists())
         handle = self.root / ".team" / "orchestrator" / f"{parsed['handle']}.json"
@@ -352,6 +361,9 @@ class ClaudeLaunchTest(unittest.TestCase):
         if dest.exists():
             self.skipTest("작업 폴더가 이미 있다")
         dest.mkdir()
+        os.environ["ORCH_RESULT"] = str(
+            dest / ".team" / "sessions" / "780078" / "result.md"
+        )
         try:
             started = self._run("start", "--unit", "검증용")
             self.assertEqual(started.returncode, 0, started.stderr)
@@ -364,12 +376,15 @@ class ClaudeLaunchTest(unittest.TestCase):
                     break
                 time.sleep(0.05)
             self.assertEqual(seen, "끝")
-            self.assertTrue((dest / "result.md").is_file())
+            self.assertTrue(
+                (dest / ".team" / "sessions" / "780078" / "result.md").is_file()
+            )
             self.assertFalse((self.root / "result.md").exists())
             self.assertFalse((dest / ".team" / "orchestrator").exists())
             handle = self.root / ".team" / "orchestrator" / f"{parsed['handle']}.json"
             self.assertTrue(handle.is_file())
         finally:
+            os.environ.pop("ORCH_RESULT", None)
             shutil.rmtree(dest, ignore_errors=True)
 
     def test_codex_is_not_launched(self) -> None:
@@ -659,8 +674,8 @@ class NoteGuardTest(unittest.TestCase):
         done = parse_record(collected.stdout)
         self.assertEqual(done["state"], "문제")
         self.assertEqual(done["line"], "")
-        self.assertIn("워커결정", done["reason"])
-        self.assertIn("워커승인", done["reason"])
+        self.assertIn(".team/sessions/780091/state.md", done["reason"])
+        self.assertIn(".team/sessions/780091/log.md", done["reason"])
         prompt = (self.root / "prompt.txt").read_text(encoding="utf-8")
         self.assertIn("맡은단위", prompt)
         self.assertIn("scripts/a.py", prompt)
@@ -941,8 +956,8 @@ class CheckOutsideTest(unittest.TestCase):
         (self.root / "bin" / "claude").write_text(
             "#!/bin/sh\n"
             "printf '%s\\n' \"$*\" > \"$ORCH_ARGV\"\n"
-            "printf '%s\\n' '워커가 씀' > worker.txt\n"
-            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 끝' > result.md\n"
+            "mkdir -p .team/sessions/780098\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 끝' > .team/sessions/780098/result.md\n"
             "exit 0\n",
             encoding="utf-8",
         )
@@ -1015,7 +1030,7 @@ class CheckOutsideTest(unittest.TestCase):
         finally:
             shutil.rmtree(dest, ignore_errors=True)
         self.assertEqual(message, "워커 결과를 담는다")
-        self.assertIn("worker.txt", names)
+        self.assertIn(".team/sessions/780098/result.md", names)
         allowed = (self.root / "argv.txt").read_text(encoding="utf-8").split("--allowedTools", 1)[-1]
         self.assertNotIn("python3", allowed)
         self.assertNotIn("commit", allowed)

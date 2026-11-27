@@ -42,8 +42,8 @@ STALL_LIMIT_SECONDS = 900  # 임시. 측정 뒤 고친다.
 MAX_TURNS = 40  # 임시. 측정 뒤 고친다.
 # 조회와 차이만. 실행과 커밋은 거둘 때 오케스트레이터가 한다. ADR 0009.
 _LOCAL_TOOLS = (
-    "Bash(git -c core.hooksPath=/dev/null status)",
-    "Bash(git -c core.hooksPath=/dev/null diff)",
+    "Bash(git -c core.hooksPath=/dev/null -c core.fsmonitor=false status)",
+    "Bash(git -c core.hooksPath=/dev/null -c core.fsmonitor=false diff)",
 )
 _REMOTE_MARK = (
     "team-session.py",
@@ -421,54 +421,69 @@ def allowed_tools() -> str:
     return " ".join(_LOCAL_TOOLS)
 
 
-def check_file_paths(command: str) -> tuple[str, ...]:
-    found: list[str] = []
-    for token in command.split():
-        candidates: list[str] = []
-        if "/" in token or token.endswith(".py"):
-            candidates.append(token)
-        if (
-            "." in token
-            and "/" not in token
-            and not token.startswith("-")
-            and token != "python3"
-        ):
-            candidates.append(token.replace(".", "/") + ".py")
-        for cand in candidates:
-            if cand not in found:
-                found.append(cand)
-    return tuple(found)
+def _fingerprint(path: Path) -> str:
+    try:
+        if path.is_symlink():
+            return "link:" + os.readlink(path)
+        if not path.is_file():
+            return ""
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return ""
 
 
-def check_digests(cwd: Path, command: str) -> dict[str, str]:
-    digests: dict[str, str] = {}
-    base = cwd.resolve()
-    for rel in check_file_paths(command):
-        path = (cwd / rel).resolve()
-        try:
-            shown = str(path.relative_to(base))
-        except ValueError:
-            continue
-        if path.is_file():
-            digests[shown] = hashlib.sha256(path.read_bytes()).hexdigest()
-        else:
-            digests[shown] = ""
-    return digests
+def _gitdir(cwd: Path) -> Path | None:
+    pointer = cwd / ".git"
+    if pointer.is_dir() and not pointer.is_symlink():
+        return pointer
+    if not (pointer.is_file() or pointer.is_symlink()):
+        return None
+    try:
+        text = pointer.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    for raw in text.splitlines():
+        if raw.startswith("gitdir:"):
+            target = Path(raw.split(":", 1)[1].strip())
+            if not target.is_absolute():
+                target = (cwd / target).resolve()
+            return target
+    return None
 
 
-def changed_check_files(cwd: Path, saved: dict[str, str]) -> tuple[str, ...]:
-    base = cwd.resolve()
+def snapshot_tree(cwd: Path) -> dict[str, str]:
+    files: dict[str, str] = {}
+    if cwd.is_dir():
+        for dirpath, dirnames, filenames in os.walk(cwd, followlinks=False):
+            dirnames.sort()
+            for name in sorted(filenames):
+                path = Path(dirpath) / name
+                files[path.relative_to(cwd).as_posix()] = _fingerprint(path)
+    gitdir = _gitdir(cwd)
+    if gitdir is not None:
+        for rel in ("config", "config.worktree", "info/attributes"):
+            files["gitdir/" + rel] = _fingerprint(gitdir / rel)
+        hooks = gitdir / "hooks"
+        if hooks.is_dir():
+            for dirpath, _dirnames, filenames in os.walk(hooks, followlinks=False):
+                for name in filenames:
+                    path = Path(dirpath) / name
+                    rel = "gitdir/hooks/" + path.relative_to(hooks).as_posix()
+                    files[rel] = _fingerprint(path)
+    return files
+
+
+def tree_changes(before: dict[str, str], after: dict[str, str], allowed: str) -> tuple[str, ...]:
     changed: list[str] = []
-    for rel, digest in saved.items():
-        path = (cwd / rel).resolve()
-        try:
-            path.relative_to(base)
-        except ValueError:
-            changed.append(rel)
+    for path in sorted(set(before) | set(after)):
+        if allowed and path == allowed:
             continue
-        now = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else ""
-        if now != digest:
-            changed.append(rel)
+        if before.get(path) != after.get(path):
+            changed.append(path)
     return tuple(changed)
 
 
@@ -718,10 +733,7 @@ def start(root: Path, unit: str) -> dict[str, str]:
         )
     if name == "native":
         extra["check"] = check
-        extra["checks"] = json.dumps(
-            check_digests(cwd, check),
-            ensure_ascii=False,
-        )
+        extra["tree"] = json.dumps(snapshot_tree(cwd), ensure_ascii=False)
         launched = _launch_claude(
             root, record["handle"], unit, cwd, allowed_tools()
         )
@@ -760,32 +772,33 @@ def collect(root: Path, handle: str) -> dict[str, str]:
         loaded = _load(root, handle)
     except OrchestratorError as exc:
         return blank(ok="아니오", state="거부", reason=str(exc))
-    changed = _restore_guard(loaded)
-    if changed:
-        record = blank(
-            ok="예",
-            handle=handle,
-            state="문제",
-            line="",
-            reason=" || ".join(changed),
-        )
-        loaded.update(record)
-        _write(root, loaded)
-        return record
     cwd = Path(loaded.get("cwd") or root)
-    try:
-        saved_checks = json.loads(loaded.get("checks") or "{}")
-    except json.JSONDecodeError:
-        saved_checks = {}
-    if isinstance(saved_checks, dict) and saved_checks:
-        moved = changed_check_files(cwd, {str(k): str(v) for k, v in saved_checks.items()})
+    owner = loaded.get("work", "")
+    allowed = f".team/sessions/{owner}/result.md" if owner else ""
+    before: dict[str, str] | None
+    if "tree" not in loaded:
+        before = None
+    else:
+        try:
+            parsed = json.loads(loaded.get("tree") or "{}")
+        except json.JSONDecodeError:
+            parsed = {}
+        before = parsed if isinstance(parsed, dict) else {}
+    if before is not None:
+        after = snapshot_tree(cwd)
+        moved = tree_changes(
+            {str(key): str(value) for key, value in before.items()},
+            after,
+            allowed,
+        )
         if moved:
+            _restore_guard(loaded)
             record = blank(
                 ok="예",
                 handle=handle,
                 state="문제",
                 line="",
-                reason="검증 파일이 바뀌었다: " + " ".join(moved),
+                reason=" ".join(moved),
             )
             loaded.update(record)
             _write(root, loaded)
@@ -812,7 +825,6 @@ def collect(root: Path, handle: str) -> dict[str, str]:
             loaded.update(record)
             _write(root, loaded)
             return record
-    owner = loaded.get("work", "")
     candidates = [cwd / "result.md"]
     if owner:
         candidates.append(cwd / ".team" / "sessions" / owner / "result.md")
@@ -865,7 +877,10 @@ def _seal_worktree(cwd: Path) -> str:
     inside = _git(cwd, ["rev-parse", "--is-inside-work-tree"])
     if inside.returncode != 0 or inside.stdout.strip() != "true":
         return ""
-    add = _git(cwd, ["-c", "core.hooksPath=/dev/null", "add", "."])
+    add = _git(
+        cwd,
+        ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "add", "."],
+    )
     if add.returncode != 0:
         return "담지 못했다"
     quiet = _git(cwd, ["diff", "--cached", "--quiet"])
@@ -876,6 +891,8 @@ def _seal_worktree(cwd: Path) -> str:
         [
             "-c",
             "core.hooksPath=/dev/null",
+            "-c",
+            "core.fsmonitor=false",
             "-c",
             "user.email=worker@localhost",
             "-c",
