@@ -1246,6 +1246,8 @@ class VerifyReadonlyTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
+        for name in ("-snap.json", "-missing.json"):
+            Path(self.tmp.name + name).unlink(missing_ok=True)
 
     def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
@@ -1258,45 +1260,52 @@ class VerifyReadonlyTest(unittest.TestCase):
             capture_output=True,
         )
 
+    def _snap(self) -> Path:
+        return Path(self.tmp.name + "-snap.json")
+
     def test_clean_tree_is_clean(self) -> None:
-        done = self._run()
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout, "깨끗\n")
+        snap = self._snap()
+        begin = self._run("--begin", "--snapshot", str(snap))
+        self.assertEqual(begin.returncode, 0, begin.stderr)
+        self.assertEqual(begin.stdout, "찍음\n")
+        end = self._run("--end", "--snapshot", str(snap))
+        self.assertEqual(end.returncode, 0, end.stderr)
+        self.assertEqual(end.stdout, "깨끗\n")
 
     def test_code_change_during_verification_fails(self) -> None:
-        before = self.root / ".team" / "before.txt"
-        before.parent.mkdir()
-        before.write_text("", encoding="utf-8")
-        start = self._run("--before", str(before))
-        self.assertEqual(start.stdout, "깨끗\n", start.stderr)
+        snap = self._snap()
+        begin = self._run("--begin", "--snapshot", str(snap))
+        self.assertEqual(begin.stdout, "찍음\n", begin.stderr)
         (self.root / "scripts" / "ok.py").write_text("x = 2\n", encoding="utf-8")
-        end = self._run("--before", str(before))
+        end = self._run("--end", "--snapshot", str(snap))
         self.assertNotEqual(end.returncode, 0)
         self.assertEqual(end.stdout, "실패\n")
         self.assertIn("scripts/ok.py", end.stderr)
 
-    def test_team_notes_stay_clean_and_a_dirty_start_fails(self) -> None:
+    def test_team_notes_stay_clean_and_a_missing_snapshot_fails(self) -> None:
+        snap = self._snap()
+        begin = self._run("--begin", "--snapshot", str(snap))
+        self.assertEqual(begin.returncode, 0, begin.stderr)
         notes = self.root / ".team" / "sessions" / "80"
         notes.mkdir(parents=True)
         (notes / "result.md").write_text("노트\n", encoding="utf-8")
-        done = self._run()
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout, "깨끗\n")
-        before = self.root / ".team" / "before.txt"
-        before.write_text("scripts/ok.py\n", encoding="utf-8")
-        stale = self._run("--before", str(before))
+        end = self._run("--end", "--snapshot", str(snap))
+        self.assertEqual(end.returncode, 0, end.stderr)
+        self.assertEqual(end.stdout, "깨끗\n")
+        missing = Path(self.tmp.name + "-missing.json")
+        stale = self._run("--end", "--snapshot", str(missing))
         self.assertNotEqual(stale.returncode, 0)
         self.assertEqual(stale.stdout, "실패\n")
 
     def test_reverted_edit_is_not_clean(self) -> None:
-        before = self.root / ".team" / "before.txt"
-        before.parent.mkdir(exist_ok=True)
-        before.write_text("", encoding="utf-8")
+        snap = self._snap()
+        begin = self._run("--begin", "--snapshot", str(snap))
+        self.assertEqual(begin.returncode, 0, begin.stderr)
         path = self.root / "scripts" / "ok.py"
         original = path.read_text(encoding="utf-8")
         path.write_text("x = 2\n", encoding="utf-8")
         path.write_text(original, encoding="utf-8")
-        done = self._run("--before", str(before))
+        done = self._run("--end", "--snapshot", str(snap))
         self.assertEqual(done.stdout, "실패\n", done.stderr)
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("scripts/ok.py", done.stderr)
@@ -1311,17 +1320,39 @@ class VerifyReadonlyTest(unittest.TestCase):
             check=True,
             capture_output=True,
         )
+        snap = self._snap()
+        begin = self._run("--begin", "--snapshot", str(snap))
+        self.assertEqual(begin.returncode, 0, begin.stderr)
         (self.root / "ignored.py").write_text("hidden\n", encoding="utf-8")
-        done = self._run()
+        done = self._run("--end", "--snapshot", str(snap))
         self.assertEqual(done.stdout, "실패\n", done.stderr)
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("ignored.py", done.stderr)
 
     def test_missing_snapshot_is_not_clean(self) -> None:
-        missing = self.root.parent / (self.root.name + "-missing.json")
-        done = self._run("--before", str(missing))
-        self.assertNotEqual(done.returncode, 0)
+        missing = Path(self.tmp.name + "-missing.json")
+        done = self._run("--end", "--snapshot", str(missing))
         self.assertEqual(done.stdout, "실패\n", done.stderr)
+        self.assertNotEqual(done.returncode, 0)
+
+    def test_link_retarget_is_not_clean(self) -> None:
+        link = self.root / "scripts" / "alias.py"
+        link.symlink_to("ok.py")
+        snap = self._snap()
+        begin = self._run("--begin", "--snapshot", str(snap))
+        self.assertEqual(begin.returncode, 0, begin.stderr)
+        link.unlink()
+        link.symlink_to("missing.py")
+        done = self._run("--end", "--snapshot", str(snap))
+        self.assertEqual(done.stdout, "실패\n", done.stderr)
+        self.assertIn("scripts/alias.py", done.stderr)
+
+    def test_snapshot_inside_work_is_not_written(self) -> None:
+        inside = self.root / "snap.json"
+        done = self._run("--begin", "--snapshot", str(inside))
+        self.assertEqual(done.stdout, "실패\n")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertFalse(inside.exists())
 
 
 if __name__ == "__main__":
