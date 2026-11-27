@@ -1970,5 +1970,148 @@ class ProbeStepsTest(unittest.TestCase):
         self.assertIn("샌드박스를 끄지 않는다", doc)
 
 
+class BashGroupTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.pids: list[int] = []
+
+    def tearDown(self) -> None:
+        for pid in self.pids:
+            if pid <= 1 or pid == os.getpid():
+                continue
+            try:
+                os.killpg(pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        self.tmp.cleanup()
+
+    def _env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["ORCH_ARGV"] = str(self.root / "argv.txt")
+        env["ORCH_CLAUDE"] = str(self.root / "bin" / "claude")
+        env["PATH"] = str(self.root / "bin") + os.pathsep + env.get("PATH", "")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        return env
+
+    def _claude(self, body: str) -> None:
+        bindir = self.root / "bin"
+        bindir.mkdir(exist_ok=True)
+        script = bindir / "claude"
+        script.write_text("#!/bin/sh\n" + body + "\nexit 0\n", encoding="utf-8")
+        script.chmod(0o755)
+
+    def _start(self, work_id: str) -> tuple[str, int]:
+        env = self._env()
+        started = subprocess.run(
+            ["python3", str(SCRIPT), "start", "--unit", "검증용"],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+        handle = parse_record(started.stdout)["handle"]
+        stored = json.loads(
+            (self.root / ".team" / "orchestrator" / f"{handle}.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        pid = int(stored.get("pid") or "0")
+        if pid:
+            self.pids.append(pid)
+        seen = ""
+        for _ in range(40):
+            polled = subprocess.run(
+                ["python3", str(SCRIPT), "poll", "--handle", handle],
+                cwd=self.root,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            seen = parse_record(polled.stdout)["state"]
+            if seen == "끝":
+                break
+            time.sleep(0.05)
+        self.assertEqual(seen, "끝")
+        return handle, pid
+
+    def test_worker_argv_allows_no_bash(self) -> None:
+        write_work(
+            self.root,
+            "780116",
+            "- 검증용 | 없음 | scripts/a.py | python3 scripts/a_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, "780116")
+        self._claude('printf \'%s\\n\' "$*" > "$ORCH_ARGV"')
+        try:
+            self._start("780116")
+            argv = (self.root / "argv.txt").read_text(encoding="utf-8")
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+        self.assertNotIn("Bash(", argv)
+        self.assertNotIn("git status", argv)
+        self.assertNotIn("git diff", argv)
+
+    def test_background_child_is_still_waiting(self) -> None:
+        work_id = "780117"
+        write_work(
+            self.root,
+            work_id,
+            "- 검증용 | 없음 | scripts/a.py | python3 scripts/a_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, work_id)
+        self._claude(
+            f"mkdir -p .team/sessions/{work_id}\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 읽기' "
+            f"> .team/sessions/{work_id}/result.md\n"
+            "sleep 60 &"
+        )
+        try:
+            handle, pid = self._start(work_id)
+            leader_gone = False
+            for _ in range(50):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    leader_gone = True
+                    break
+                time.sleep(0.05)
+            self.assertTrue(leader_gone)
+            child = False
+            for entry in Path("/proc").iterdir():
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    raw = (entry / "stat").read_text(encoding="utf-8")
+                except (OSError, UnicodeError):
+                    continue
+                end = raw.rfind(")")
+                if end == -1:
+                    continue
+                fields = raw[end + 2 :].split()
+                if len(fields) < 5 or fields[0] == "Z":
+                    continue
+                if fields[2] == str(pid):
+                    child = True
+                    break
+            self.assertTrue(child)
+            collected = subprocess.run(
+                ["python3", str(SCRIPT), "collect", "--handle", handle],
+                cwd=self.root,
+                env=self._env(),
+                text=True,
+                capture_output=True,
+            )
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+        done = parse_record(collected.stdout)
+        self.assertEqual(done["state"], "대기")
+        self.assertEqual(done["line"], "")
+
+
 if __name__ == "__main__":
     unittest.main()
