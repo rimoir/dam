@@ -12,8 +12,8 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -40,23 +40,11 @@ HANDLE = re.compile(r"^(native|fake)-[0-9]+$")
 WORKER_LIMIT = 3  # 임시. 측정 뒤 고친다.
 STALL_LIMIT_SECONDS = 900  # 임시. 측정 뒤 고친다.
 MAX_TURNS = 40  # 임시. 측정 뒤 고친다.
-# 조회와 차이만. 실행과 커밋은 거둘 때 오케스트레이터가 한다. ADR 0009.
+# 조회와 차이만. 수거는 워커 폴더에서 실행하지 않는다. ADR 0009.
 _LOCAL_TOOLS = (
     "Bash(git -c core.hooksPath=/dev/null -c core.fsmonitor=false status)",
     "Bash(git -c core.hooksPath=/dev/null -c core.fsmonitor=false diff)",
 )
-_REMOTE_MARK = (
-    "team-session.py",
-    "issue_tracker.py",
-    "gh",
-    "git push",
-    "curl",
-    "wget",
-    "ssh",
-    "http://",
-    "https://",
-)
-_SHELL_MARK = set(";|&$`><\n*")
 _NOTE_SUFFIXES = {".md", ".txt", ".json"}
 
 
@@ -355,7 +343,80 @@ def _capture_guard(root: Path, cwd: Path, work_id: str) -> dict[str, list[dict[s
     return {"files": files}
 
 
-def _restore_guard(loaded: dict[str, str]) -> tuple[str, ...]:
+def _process_alive(pid: str) -> bool:
+    text = pid.strip()
+    if not text:
+        return False
+    try:
+        number = int(text)
+    except ValueError:
+        return False
+    if number <= 0:
+        return False
+    try:
+        os.kill(number, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return not _zombie(number)
+
+
+def _zombie(number: int) -> bool:
+    try:
+        raw = Path(f"/proc/{number}/stat").read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    end = raw.rfind(")")
+    if end == -1:
+        return False
+    fields = raw[end + 2 :].split()
+    return bool(fields) and fields[0] == "Z"
+
+
+def _read_regular(path: Path) -> str | None:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks).decode("utf-8")
+    except (OSError, UnicodeError):
+        return None
+    finally:
+        os.close(fd)
+
+
+def _write_regular(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if path.is_symlink():
+            path.unlink()
+    except OSError:
+        return
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags, 0o644)
+    except OSError:
+        return
+    try:
+        os.write(fd, text.encode("utf-8"))
+    finally:
+        os.close(fd)
+
+
+def _restore_guard(loaded: dict[str, str], root: Path) -> tuple[str, ...]:
     raw = loaded.get("guard", "")
     if not raw:
         return ()
@@ -363,6 +424,7 @@ def _restore_guard(loaded: dict[str, str]) -> tuple[str, ...]:
         guard = json.loads(raw)
     except json.JSONDecodeError:
         return ()
+    cwd = Path(loaded.get("cwd") or "")
     changed: list[str] = []
     for item in guard.get("files", []):
         folder = Path(str(item.get("dir", "")))
@@ -372,49 +434,21 @@ def _restore_guard(loaded: dict[str, str]) -> tuple[str, ...]:
         before_a = tuple(str(line) for line in item.get("approvals", []))
         state_path = folder / "state.md"
         log_path = folder / "log.md"
-        state = _text(state_path)
-        log = _text(log_path)
+        state = _read_regular(state_path) or ""
+        log = _read_regular(log_path) or ""
         after_d = decision_body(state)
         after_a = approval_lines(log)
         changed.extend(changed_note_lines(before_d, after_d, before_a, after_a))
+        if cwd and folder != root and _inside(folder, cwd):
+            continue
+        if not _inside(folder, root):
+            continue
         if after_d != before_d:
-            base = state if state_path.is_file() else "# 상태\n\n## 결정\n"
-            state_path.parent.mkdir(parents=True, exist_ok=True)
-            state_path.write_text(replace_section(base, "## 결정", before_d), encoding="utf-8")
+            base = state if state else "# 상태\n\n## 결정\n"
+            _write_regular(state_path, replace_section(base, "## 결정", before_d))
         if after_a != before_a:
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            log_path.write_text(restore_approvals(log, before_a), encoding="utf-8")
+            _write_regular(log_path, restore_approvals(log, before_a))
     return tuple(dict.fromkeys(changed))
-
-
-def verification_problem(command: str) -> str:
-    text = command.strip()
-    if not text:
-        return "검증 명령이 없다"
-    if any(mark in text for mark in _SHELL_MARK):
-        return "검증 명령이 원격에 닿는다"
-    lowered = text.lower()
-    for mark in _REMOTE_MARK:
-        if mark in lowered:
-            return "검증 명령이 원격에 닿는다"
-    return ""
-
-
-def unit_check(root: Path, unit: str) -> str:
-    owner = work_owning_unit(root, unit)
-    if not owner or owner == "*":
-        return ""
-    task = root / ".team" / "sessions" / owner / "task.md"
-    if not task.is_file():
-        return ""
-    try:
-        units = read_plan_units(task.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError):
-        return ""
-    for name, _dep, _files, check in units:
-        if name == unit:
-            return check
-    return ""
 
 
 def allowed_tools() -> str:
@@ -423,28 +457,49 @@ def allowed_tools() -> str:
 
 def _fingerprint(path: Path) -> str:
     try:
-        if path.is_symlink():
+        info = path.lstat()
+    except OSError:
+        return ""
+    if stat.S_ISLNK(info.st_mode):
+        try:
             return "link:" + os.readlink(path)
-        if not path.is_file():
+        except OSError:
+            return ""
+    if not stat.S_ISREG(info.st_mode):
+        return ""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return ""
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
             return ""
         digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
         return digest.hexdigest()
     except OSError:
         return ""
+    finally:
+        os.close(fd)
 
 
 def _gitdir(cwd: Path) -> Path | None:
     pointer = cwd / ".git"
-    if pointer.is_dir() and not pointer.is_symlink():
-        return pointer
-    if not (pointer.is_file() or pointer.is_symlink()):
-        return None
     try:
-        text = pointer.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
+        info = pointer.lstat()
+    except OSError:
+        return None
+    if stat.S_ISDIR(info.st_mode):
+        return pointer
+    if not stat.S_ISREG(info.st_mode):
+        return None
+    text = _read_regular(pointer)
+    if not text:
         return None
     for raw in text.splitlines():
         if raw.startswith("gitdir:"):
@@ -455,25 +510,65 @@ def _gitdir(cwd: Path) -> Path | None:
     return None
 
 
+def _commondir(gitdir: Path) -> Path | None:
+    text = _read_regular(gitdir / "commondir")
+    if text is None:
+        return None
+    raw = text.strip()
+    if not raw or "\n" in raw or "\x00" in raw:
+        return None
+    target = Path(raw)
+    target = target.resolve() if target.is_absolute() else (gitdir / target).resolve()
+    try:
+        info = target.lstat()
+    except OSError:
+        return None
+    if not stat.S_ISDIR(info.st_mode):
+        return None
+    return target
+
+
+def _hash_git_meta(files: dict[str, str], prefix: str, folder: Path) -> None:
+    for rel in ("config", "config.worktree", "info/attributes"):
+        files[f"{prefix}/{rel}"] = _fingerprint(folder / rel)
+    hooks = folder / "hooks"
+    try:
+        info = hooks.lstat()
+    except OSError:
+        return
+    if not stat.S_ISDIR(info.st_mode):
+        return
+    for dirpath, dirnames, filenames in os.walk(hooks, followlinks=False):
+        dirnames[:] = [
+            name for name in dirnames if not (Path(dirpath) / name).is_symlink()
+        ]
+        for name in filenames:
+            path = Path(dirpath) / name
+            rel = f"{prefix}/hooks/" + path.relative_to(hooks).as_posix()
+            files[rel] = _fingerprint(path)
+
+
 def snapshot_tree(cwd: Path) -> dict[str, str]:
     files: dict[str, str] = {}
     if cwd.is_dir():
         for dirpath, dirnames, filenames in os.walk(cwd, followlinks=False):
-            dirnames.sort()
+            kept: list[str] = []
+            for name in sorted(dirnames):
+                path = Path(dirpath) / name
+                if path.is_symlink():
+                    files[path.relative_to(cwd).as_posix()] = _fingerprint(path)
+                else:
+                    kept.append(name)
+            dirnames[:] = kept
             for name in sorted(filenames):
                 path = Path(dirpath) / name
                 files[path.relative_to(cwd).as_posix()] = _fingerprint(path)
     gitdir = _gitdir(cwd)
     if gitdir is not None:
-        for rel in ("config", "config.worktree", "info/attributes"):
-            files["gitdir/" + rel] = _fingerprint(gitdir / rel)
-        hooks = gitdir / "hooks"
-        if hooks.is_dir():
-            for dirpath, _dirnames, filenames in os.walk(hooks, followlinks=False):
-                for name in filenames:
-                    path = Path(dirpath) / name
-                    rel = "gitdir/hooks/" + path.relative_to(hooks).as_posix()
-                    files[rel] = _fingerprint(path)
+        _hash_git_meta(files, "gitdir", gitdir)
+        common = _commondir(gitdir)
+        if common is not None and common != gitdir:
+            _hash_git_meta(files, "common", common)
     return files
 
 
@@ -714,12 +809,6 @@ def start(root: Path, unit: str) -> dict[str, str]:
         problem = claude_problem()
         if problem:
             return blank(ok="아니오", state="거부", reason=problem)
-        check = unit_check(root, unit)
-        blocked = verification_problem(check)
-        if blocked:
-            return blank(ok="아니오", state="거부", reason=blocked)
-    else:
-        check = ""
     folder = _store(root)
     number = 1 + sum(1 for _found in folder.glob(f"{name}-*.json"))
     record = blank(ok="예", handle=f"{name}-{number}", state="대기")
@@ -732,7 +821,6 @@ def start(root: Path, unit: str) -> dict[str, str]:
             ensure_ascii=False,
         )
     if name == "native":
-        extra["check"] = check
         extra["tree"] = json.dumps(snapshot_tree(cwd), ensure_ascii=False)
         launched = _launch_claude(
             root, record["handle"], unit, cwd, allowed_tools()
@@ -764,6 +852,33 @@ def poll(root: Path, handle: str) -> dict[str, str]:
     return blank(**{key: loaded.get(key, "") for key in FIELDS})
 
 
+def _result_reason(cwd: Path, path: Path) -> str:
+    try:
+        return path.relative_to(cwd).as_posix()
+    except ValueError:
+        return "result.md"
+
+
+def _state_text(root: Path, cwd: Path, owner: str) -> str:
+    if not owner:
+        return ""
+    for folder in (
+        cwd / ".team" / "sessions" / owner,
+        root / ".team" / "sessions" / owner,
+    ):
+        text = _read_regular(folder / "state.md")
+        if text is not None:
+            return text
+    return ""
+
+
+def _problem(root: Path, loaded: dict[str, str], handle: str, reason: str) -> dict[str, str]:
+    record = blank(ok="예", handle=handle, state="문제", line="", reason=reason)
+    loaded.update(record)
+    _write(root, loaded)
+    return record
+
+
 def collect(root: Path, handle: str) -> dict[str, str]:
     polled = poll(root, handle)
     if polled["ok"] != "예" or polled["state"] != "끝":
@@ -772,6 +887,8 @@ def collect(root: Path, handle: str) -> dict[str, str]:
         loaded = _load(root, handle)
     except OrchestratorError as exc:
         return blank(ok="아니오", state="거부", reason=str(exc))
+    if _process_alive(loaded.get("pid", "")):
+        return blank(ok="예", handle=handle, state="대기", line="", reason="")
     cwd = Path(loaded.get("cwd") or root)
     owner = loaded.get("work", "")
     allowed = f".team/sessions/{owner}/result.md" if owner else ""
@@ -792,119 +909,35 @@ def collect(root: Path, handle: str) -> dict[str, str]:
             allowed,
         )
         if moved:
-            _restore_guard(loaded)
-            record = blank(
-                ok="예",
-                handle=handle,
-                state="문제",
-                line="",
-                reason=" ".join(moved),
-            )
-            loaded.update(record)
-            _write(root, loaded)
-            return record
-    check_command = loaded.get("check", "").strip()
-    check_code = 0
-    if check_command:
-        ran = subprocess.run(
-            shlex.split(check_command),
-            cwd=cwd,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        check_code = ran.returncode
-        if check_code != 0:
-            record = blank(
-                ok="예",
-                handle=handle,
-                state="실패",
-                line="",
-                reason="검증이 실패했다",
-            )
-            loaded.update(record)
-            _write(root, loaded)
-            return record
-    candidates = [cwd / "result.md"]
-    if owner:
-        candidates.append(cwd / ".team" / "sessions" / owner / "result.md")
-        candidates.append(root / ".team" / "sessions" / owner / "result.md")
-    result_path = next((path for path in candidates if path.is_file()), candidates[0])
-    raw = result_path.read_text(encoding="utf-8") if result_path.is_file() else ""
-    cleaned = redact_secret(raw)
-    if result_path.is_file() and cleaned != raw:
-        result_path.write_text(cleaned, encoding="utf-8")
-    line = result_section_line(cleaned)
+            _restore_guard(loaded, root)
+            return _problem(root, loaded, handle, " ".join(moved))
+    result_path = (
+        cwd / ".team" / "sessions" / owner / "result.md" if owner else cwd / "result.md"
+    )
+    try:
+        result_info = result_path.lstat()
+    except FileNotFoundError:
+        result_info = None
+    except OSError:
+        return _problem(root, loaded, handle, _result_reason(cwd, result_path))
+    if result_info is not None and not stat.S_ISREG(result_info.st_mode):
+        return _problem(root, loaded, handle, _result_reason(cwd, result_path))
+    raw = _read_regular(result_path) if result_info is not None else ""
+    if result_info is not None and raw is None:
+        return _problem(root, loaded, handle, _result_reason(cwd, result_path))
+    line = result_section_line(redact_secret(raw or ""))
     try:
         code = int(loaded.get("exit", "0") or "0")
     except ValueError:
         code = 1
-    if check_code != 0:
-        code = check_code
-    state_text = ""
-    if owner:
-        for folder in (
-            cwd / ".team" / "sessions" / owner,
-            root / ".team" / "sessions" / owner,
-        ):
-            state_path = folder / "state.md"
-            if state_path.is_file():
-                state_text = state_path.read_text(encoding="utf-8")
-            scrub_notes(folder)
-    kind = judge(code, line, next_action_updated(state_text))
-    if check_command and check_code == 0 and kind != "문제":
-        sealed = _seal_worktree(cwd)
-        if sealed:
-            kind = "문제"
-            line = ""
-            reason_seal = sealed
-        else:
-            reason_seal = ""
-    else:
-        reason_seal = ""
-    first_path = _store(root) / f"{handle}.first"
-    if first_path.is_file():
-        stamp = first_path.read_text(encoding="utf-8").strip()
-        if stamp:
-            loaded["first_event"] = stamp
-    record = blank(ok="예", handle=handle, state=kind, line=line, reason=reason_seal)
+    kind = judge(code, line, next_action_updated(_state_text(root, cwd, owner)))
+    stamp = _read_regular(_store(root) / f"{handle}.first")
+    if stamp and stamp.strip():
+        loaded["first_event"] = stamp.strip()
+    record = blank(ok="예", handle=handle, state=kind, line=line, reason="")
     loaded.update(record)
     _write(root, loaded)
     return record
-
-
-def _seal_worktree(cwd: Path) -> str:
-    inside = _git(cwd, ["rev-parse", "--is-inside-work-tree"])
-    if inside.returncode != 0 or inside.stdout.strip() != "true":
-        return ""
-    add = _git(
-        cwd,
-        ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "add", "."],
-    )
-    if add.returncode != 0:
-        return "담지 못했다"
-    quiet = _git(cwd, ["diff", "--cached", "--quiet"])
-    if quiet.returncode == 0:
-        return ""
-    commit = _git(
-        cwd,
-        [
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "core.fsmonitor=false",
-            "-c",
-            "user.email=worker@localhost",
-            "-c",
-            "user.name=worker",
-            "commit",
-            "-m",
-            "워커 결과를 담는다",
-        ],
-    )
-    if commit.returncode != 0:
-        return "커밋하지 못했다"
-    return ""
 
 
 def _git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -1043,18 +1076,21 @@ def redact_secret(text: str) -> str:
 
 
 def scrub_notes(folder: Path) -> None:
-    if not folder.is_dir():
+    try:
+        info = folder.lstat()
+    except OSError:
+        return
+    if not stat.S_ISDIR(info.st_mode):
         return
     for path in folder.iterdir():
-        if not path.is_file() or path.suffix not in _NOTE_SUFFIXES:
+        if path.suffix not in _NOTE_SUFFIXES:
             continue
-        try:
-            raw = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeError):
+        raw = _read_regular(path)
+        if raw is None:
             continue
         cleaned = redact(raw)
         if cleaned != raw:
-            path.write_text(cleaned, encoding="utf-8")
+            _write_regular(path, cleaned)
 
 
 def judge(
@@ -1100,14 +1136,18 @@ def collect_work(root: Path, work_id: str, exit_code: int = 0) -> dict[str, str]
     folder = root / ".team" / "sessions" / work_id
     result_path = folder / "result.md"
     state_path = folder / "state.md"
-    raw = result_path.read_text(encoding="utf-8") if result_path.is_file() else ""
+    raw = _read_regular(result_path) or ""
     cleaned = redact_secret(raw)
-    if result_path.is_file() and cleaned != raw:
-        result_path.write_text(cleaned, encoding="utf-8")
+    if raw and cleaned != raw:
+        _write_regular(result_path, cleaned)
     line = result_section_line(cleaned)
-    if folder.is_dir():
-        (folder / "worker-out.txt").write_text(line + "\n", encoding="utf-8")
-    state = state_path.read_text(encoding="utf-8") if state_path.is_file() else ""
+    try:
+        folder_info = folder.lstat()
+    except OSError:
+        folder_info = None
+    if folder_info is not None and stat.S_ISDIR(folder_info.st_mode):
+        _write_regular(folder / "worker-out.txt", line + "\n")
+    state = _read_regular(state_path) or ""
     kind = judge(exit_code, line, next_action_updated(state))
     scrub_notes(folder)
     return blank(ok="예", state=kind, line=line)

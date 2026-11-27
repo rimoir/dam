@@ -294,6 +294,10 @@ class ClaudeLaunchTest(unittest.TestCase):
         (dest / "scripts" / "orchestrator_test.py").write_text(
             "raise SystemExit(0)\n", encoding="utf-8"
         )
+        (self.root / ".team" / "sessions" / "780079" / "state.md").write_text(
+            "# 상태\n\n## 다음 할 일\n\n결과를 적었다\n",
+            encoding="utf-8",
+        )
         os.environ["ORCH_RESULT"] = str(
             dest / ".team" / "sessions" / "780079" / "result.md"
         )
@@ -321,6 +325,7 @@ class ClaudeLaunchTest(unittest.TestCase):
         collected = self._run("collect", "--handle", parsed["handle"])
         self.assertEqual(collected.returncode, 0, collected.stderr)
         done = parse_record(collected.stdout)
+        self.assertEqual(done["state"], "성공")
         self.assertTrue(done["line"].startswith("PASS"))
         argv = (self.root / "claude-argv.txt").read_text(encoding="utf-8")
         self.assertIn("--max-turns", argv)
@@ -841,7 +846,7 @@ class ToolScopeTest(unittest.TestCase):
         self.assertNotIn("python3", allowed)
         self.assertNotIn("commit", allowed)
 
-    def test_remote_verification_refuses(self) -> None:
+    def test_remote_verification_is_not_run(self) -> None:
         write_work(
             self.root,
             "780094",
@@ -849,18 +854,41 @@ class ToolScopeTest(unittest.TestCase):
             GO,
         )
         dest = place_worktree(self.root, "780094")
+        (dest / "scripts").mkdir()
+        (dest / "scripts" / "team-session.py").write_text(
+            "open('ran-marker','w').write('remote')\n", encoding="utf-8"
+        )
+        (self.root / "bin" / "claude").write_text(
+            "#!/bin/sh\n"
+            "mkdir -p .team/sessions/780094\n"
+            "printf '%s\\n' '# 결과' '' '## 결과' '' 'PASS 읽기' "
+            "> .team/sessions/780094/result.md\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        (self.root / "bin" / "claude").chmod(0o755)
         try:
             started = self._run("start", "--unit", "검증용")
+            self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+            handle = parse_record(started.stdout)["handle"]
+            self.assertNotEqual(handle, "")
+            seen = ""
+            for _ in range(40):
+                polled = self._run("poll", "--handle", handle)
+                seen = parse_record(polled.stdout)["state"]
+                if seen == "끝":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(seen, "끝")
+            collected = self._run("collect", "--handle", handle)
+            self.assertFalse((dest / "ran-marker").exists())
         finally:
             shutil.rmtree(dest, ignore_errors=True)
-        self.assertNotEqual(started.returncode, 0, started.stdout + started.stderr)
-        parsed = parse_record(started.stdout)
-        self.assertEqual(parsed["state"], "거부")
-        self.assertEqual(parsed["handle"], "")
-        self.assertIn("원격", parsed["reason"])
-        self.assertFalse((self.root / ".team" / "orchestrator").exists())
+        done = parse_record(collected.stdout)
+        self.assertNotEqual(done["state"], "거부")
+        self.assertTrue(done["line"].startswith("PASS"))
 
-    def test_missing_verification_refuses(self) -> None:
+    def test_missing_verification_still_starts(self) -> None:
         write_work(
             self.root,
             "780095",
@@ -872,11 +900,11 @@ class ToolScopeTest(unittest.TestCase):
             started = self._run("start", "--unit", "검증용")
         finally:
             shutil.rmtree(dest, ignore_errors=True)
-        self.assertNotEqual(started.returncode, 0, started.stdout + started.stderr)
+        self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
         parsed = parse_record(started.stdout)
-        self.assertEqual(parsed["state"], "거부")
-        self.assertEqual(parsed["handle"], "")
-        self.assertIn("검증 명령이 없다", parsed["reason"])
+        self.assertEqual(parsed["ok"], "예")
+        self.assertNotEqual(parsed["handle"], "")
+        self.assertNotEqual(parsed["state"], "거부")
 
 
 class CheckOutsideTest(unittest.TestCase):
@@ -968,6 +996,10 @@ class CheckOutsideTest(unittest.TestCase):
             "- 검증용 | 없음 | scripts/ok_test.py | python3 scripts/ok_test.py",
             GO,
         )
+        (self.root / ".team" / "sessions" / "780098" / "state.md").write_text(
+            "# 상태\n\n## 다음 할 일\n\n결과를 적었다\n",
+            encoding="utf-8",
+        )
         dest = place_worktree(self.root, "780098")
         (dest / "scripts").mkdir()
         (dest / "scripts" / "ok_test.py").write_text("print('원래')\n", encoding="utf-8")
@@ -1030,8 +1062,11 @@ class CheckOutsideTest(unittest.TestCase):
             ).stdout
         finally:
             shutil.rmtree(dest, ignore_errors=True)
-        self.assertEqual(message, "워커 결과를 담는다")
-        self.assertIn(".team/sessions/780098/result.md", names)
+        done = parse_record(collected.stdout)
+        self.assertEqual(done["state"], "성공")
+        self.assertTrue(done["line"].startswith("PASS"))
+        self.assertEqual(message, "처음")
+        self.assertNotIn(".team/sessions/780098/result.md", names)
         allowed = (self.root / "argv.txt").read_text(encoding="utf-8").split("--allowedTools", 1)[-1]
         self.assertNotIn("python3", allowed)
         self.assertNotIn("commit", allowed)
