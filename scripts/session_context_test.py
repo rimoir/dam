@@ -1383,7 +1383,14 @@ class VerifyReadonlyTest(unittest.TestCase):
         short = self._run("--end", "--snapshot", str(snap), "--expect", "ab")
         self.assertEqual(short.stdout, "실패\n")
 
+    def _need_isolation(self) -> None:
+        from verify_report import isolation_available
+
+        if not isolation_available():
+            self.skipTest("unshare가 없다")
+
     def test_isolated_rewrite_is_not_clean(self) -> None:
+        self._need_isolation()
         snap = Path(self.tmp.name + "-snap.json")
         command = (
             "printf 'x = 9\\n' > scripts/ok.py; printf hack > "
@@ -1402,6 +1409,7 @@ class VerifyReadonlyTest(unittest.TestCase):
         self.assertNotIn(b"hack", snap.read_bytes())
 
     def test_isolated_unchanged_tree_is_clean(self) -> None:
+        self._need_isolation()
         snap = Path(self.tmp.name + "-snap.json")
         done = self._run("--isolated", "--snapshot", str(snap), "--command", "true")
         self.assertEqual(done.returncode, 0, done.stderr)
