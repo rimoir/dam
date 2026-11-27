@@ -1,12 +1,12 @@
 $ python3 scripts/orchestrator_test.py
-................................
+...................................
 ----------------------------------------------------------------------
-Ran 32 tests in 2.141s
+Ran 35 tests in 4.212s
 
 OK
-$ python3 -m unittest scripts.orchestrator_test.ClaudeLaunchTest
+$ python3 -m unittest scripts.orchestrator_test.LaunchBoundaryTest
 ...
 ----------------------------------------------------------------------
-Ran 3 tests in 0.309s
+Ran 3 tests in 2.166s
 
 OK

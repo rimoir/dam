@@ -132,13 +132,39 @@ def _tool_choice() -> str:
     return os.environ.get("ORCH_TOOL", "claude").strip() or "claude"
 
 
-def worker_cwd(root: Path, unit: str) -> Path:
+def _inside(child: Path, parent: Path) -> bool:
+    try:
+        child.resolve().relative_to(parent.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def resolve_claude() -> str | None:
+    explicit = os.environ.get("ORCH_CLAUDE", "").strip()
+    if explicit == "-":
+        return None
+    if explicit:
+        path = Path(explicit)
+        return str(path) if path.is_file() else None
+    return shutil.which("claude")
+
+
+def worker_cwd(root: Path, unit: str) -> Path | str:
     owner = work_owning_unit(root, unit)
-    if owner and owner != "*" and re.fullmatch(r"[0-9]+", owner):
-        dest = root.resolve().parent / f"dam-{owner}"
-        if dest.is_dir():
-            return dest
-    return root
+    if not owner:
+        return "계획에 없는 단위다"
+    if owner == "*":
+        return "단위가 여러 작업에 있다"
+    if re.fullmatch(r"[0-9]+", owner) is None:
+        return "작업ID가 이슈 번호가 아니다"
+    dest = (root.resolve().parent / f"dam-{owner}").resolve()
+    if not dest.is_dir():
+        return "작업 폴더가 없다"
+    notes = root.resolve()
+    if dest == notes or _inside(notes, dest):
+        return "작업 폴더가 노트 루트다"
+    return dest
 
 
 def worker_prompt(root: Path, unit: str) -> str:
@@ -156,15 +182,16 @@ def worker_prompt(root: Path, unit: str) -> str:
     )
 
 
-def _launch_claude(root: Path, handle: str, unit: str) -> tuple[int, str] | str | None:
-    if shutil.which("claude") is None:
+def _launch_claude(root: Path, handle: str, unit: str, cwd: Path) -> tuple[int, str] | str | None:
+    binary = resolve_claude()
+    if binary is None:
         return None
-    cwd = worker_cwd(root, unit)
     exit_path = _store(root) / f"{handle}.exit"
     out_path = _store(root) / f"{handle}.out"
-    wrapper = 'claude "$@"; echo $? > "$ORCH_EXIT"'
+    wrapper = '"$ORCH_CLAUDE_BIN" "$@"; echo $? > "$ORCH_EXIT"'
     env = os.environ.copy()
     env["ORCH_EXIT"] = str(exit_path)
+    env["ORCH_CLAUDE_BIN"] = binary
     out = out_path.open("w", encoding="utf-8")
     try:
         proc = subprocess.Popen(
@@ -371,21 +398,25 @@ def start(root: Path, unit: str) -> dict[str, str]:
         )
     if _tool_choice() == "codex":
         return blank(ok="아니오", state="거부", reason="Codex는 미검증이다")
+    cwd = worker_cwd(root, unit)
+    if isinstance(cwd, str):
+        return blank(ok="아니오", state="거부", reason=cwd)
     folder = _store(root)
     number = 1 + sum(1 for _found in folder.glob(f"{name}-*.json"))
     record = blank(ok="예", handle=f"{name}-{number}", state="대기")
-    extra: dict[str, str] = {}
+    extra: dict[str, str] = {"cwd": str(cwd)}
+    owner = work_owning_unit(root, unit)
+    if owner and owner != "*":
+        extra["work"] = owner
     if name == "native":
-        launched = _launch_claude(root, record["handle"], unit)
+        launched = _launch_claude(root, record["handle"], unit, cwd)
         if isinstance(launched, str):
             return blank(ok="아니오", state="거부", reason=launched)
         if launched is not None:
-            pid, cwd = launched
+            pid, _cwd = launched
             record["state"] = "진행"
-            extra = {"tool": "claude", "pid": str(pid), "cwd": cwd}
-            owner = work_owning_unit(root, unit)
-            if owner and owner != "*":
-                extra["work"] = owner
+            extra["tool"] = "claude"
+            extra["pid"] = str(pid)
     _write(root, {**record, **extra})
     return _read(root, record["handle"])
 

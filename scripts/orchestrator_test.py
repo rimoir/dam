@@ -18,6 +18,19 @@ SESSION = ROOT / "scripts" / "team-session.py"
 FIELDS = ("ok", "handle", "state", "line", "reason")
 
 
+def setUpModule() -> None:
+    # 테스트 프로세스는 PATH의 실제 도구를 고르지 않는다.
+    os.environ["ORCH_CLAUDE"] = "-"
+
+
+def place_worktree(root: Path, work_id: str) -> Path:
+    dest = root.resolve().parent / f"dam-{work_id}"
+    if dest.exists():
+        raise RuntimeError(f"작업 폴더가 이미 있다: {dest}")
+    dest.mkdir()
+    return dest
+
+
 def load_module(path: Path, name: str):
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
@@ -126,27 +139,51 @@ class AdapterShapeTest(unittest.TestCase):
 
     def test_fake_and_native_return_the_same_fields(self) -> None:
         module = load_module(SCRIPT, "orchestrator_shape")
-        native = module.start(self.root, "72")
-        self.write_lock("orchestrator: fake\n")
+        refused = module.start(self.root, "72")
+        self.assertEqual(tuple(refused), FIELDS)
+        self.assertEqual(refused["state"], "거부")
+        self.assertEqual(refused["handle"], "")
+        self.assertIn("계획", refused["reason"])
+        write_work(
+            self.root,
+            "720072",
+            "- 대기 | 없음 | scripts/orchestrator.py | python3 scripts/orchestrator_test.py",
+            GO,
+        )
         other = Path(self.tmp.name) / "fake-root"
         other.mkdir()
         (other / ".team").mkdir()
         (other / ".team" / "adapters.lock").write_text(
             "orchestrator: fake\n", encoding="utf-8"
         )
-        fake = module.start(other, "72")
-        self.assertEqual(tuple(native), FIELDS)
-        self.assertEqual(tuple(fake), FIELDS)
-        self.assertEqual(native["ok"], "예")
-        self.assertEqual(fake["ok"], "예")
-        self.assertEqual(native["state"], "대기")
-        self.assertEqual(fake["state"], "대기")
-        self.assertTrue(native["handle"].startswith("native-"))
-        self.assertTrue(fake["handle"].startswith("fake-"))
-        polled = module.poll(self.root, native["handle"])
-        collected = module.collect(self.root, native["handle"])
-        self.assertEqual(tuple(polled), FIELDS)
-        self.assertEqual(tuple(collected), FIELDS)
+        write_work(
+            other,
+            "720073",
+            "- 대기 | 없음 | scripts/orchestrator.py | python3 scripts/orchestrator_test.py",
+            GO,
+        )
+        native_dir = place_worktree(self.root, "720072")
+        fake_dir = place_worktree(other, "720073")
+        try:
+            native = module.start(self.root, "대기")
+            fake = module.start(other, "대기")
+            self.assertEqual(tuple(native), FIELDS)
+            self.assertEqual(tuple(fake), FIELDS)
+            self.assertEqual(native["ok"], "예")
+            self.assertEqual(fake["ok"], "예")
+            self.assertEqual(native["state"], "대기")
+            self.assertEqual(fake["state"], "대기")
+            self.assertTrue(native["handle"].startswith("native-"))
+            self.assertTrue(fake["handle"].startswith("fake-"))
+            self.assertFalse((native_dir / ".team" / "orchestrator").exists())
+            self.assertFalse((fake_dir / ".team" / "orchestrator").exists())
+            polled = module.poll(self.root, native["handle"])
+            collected = module.collect(self.root, native["handle"])
+            self.assertEqual(tuple(polled), FIELDS)
+            self.assertEqual(tuple(collected), FIELDS)
+        finally:
+            shutil.rmtree(native_dir, ignore_errors=True)
+            shutil.rmtree(fake_dir, ignore_errors=True)
 
     def test_unknown_name_refuses_without_a_handle(self) -> None:
         module = load_module(SCRIPT, "orchestrator_unknown")
@@ -172,28 +209,14 @@ class AdapterShapeTest(unittest.TestCase):
             if lock:
                 (team / "adapters.lock").write_text(lock, encoding="utf-8")
             started = run_orch(root, "start", "--unit", "72")
-            self.assertEqual(started.returncode, 0, started.stderr)
+            self.assertNotEqual(started.returncode, 0, started.stderr)
             parsed = parse_record(started.stdout)
             self.assertEqual(tuple(parsed), FIELDS)
-            self.assertEqual(parsed["ok"], "예")
-            self.assertTrue(parsed["handle"].startswith(f"{name}-"))
-            polled = run_orch(root, "poll", "--handle", parsed["handle"])
-            collected = run_orch(root, "collect", "--handle", parsed["handle"])
-            self.assertEqual(polled.returncode, 0, polled.stderr)
-            self.assertEqual(collected.returncode, 0, collected.stderr)
-            self.assertEqual(tuple(parse_record(polled.stdout)), FIELDS)
-            self.assertEqual(tuple(parse_record(collected.stdout)), FIELDS)
+            self.assertEqual(parsed["ok"], "아니오")
+            self.assertEqual(parsed["state"], "거부")
+            self.assertEqual(parsed["handle"], "")
             seen.append(list(parse_record(started.stdout)))
-            if name == "native":
-                appeared = False
-                for _ in range(40):
-                    if (root / "marker.txt").exists():
-                        appeared = True
-                        break
-                    time.sleep(0.05)
-                self.assertTrue(appeared)
-            else:
-                self.assertFalse((root / "marker.txt").exists())
+            self.assertFalse((root / "marker.txt").exists())
         self.assertEqual(seen[0].__len__(), seen[1].__len__())
 
     def test_cli_unknown_name_refuses(self) -> None:
@@ -244,6 +267,7 @@ class ClaudeLaunchTest(unittest.TestCase):
         env["ORCH_ARGV"] = str(self.root / "claude-argv.txt")
         env["ORCH_CODEX"] = str(self.root / "codex-ran.txt")
         env["PATH"] = str(self.root / "bin") + os.pathsep + env.get("PATH", "")
+        env["ORCH_CLAUDE"] = str(self.root / "bin" / "claude")
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         return subprocess.run(
             ["python3", str(SCRIPT), *args],
@@ -254,6 +278,19 @@ class ClaudeLaunchTest(unittest.TestCase):
         )
 
     def test_start_poll_collect_runs_claude_and_reaps_it(self) -> None:
+        write_work(
+            self.root,
+            "780079",
+            "- 검증용 | 없음 | scripts/orchestrator.py | python3 scripts/orchestrator_test.py",
+            GO,
+        )
+        dest = place_worktree(self.root, "780079")
+        try:
+            self._assert_reaped(dest)
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+
+    def _assert_reaped(self, dest: Path) -> None:
         started = self._run("start", "--unit", "검증용")
         self.assertEqual(started.returncode, 0, started.stderr)
         parsed = parse_record(started.stdout)
@@ -279,6 +316,12 @@ class ClaudeLaunchTest(unittest.TestCase):
         self.assertNotIn("bypassPermissions", argv)
         self.assertNotIn("dangerously-skip-permissions", argv)
         self.assertFalse((self.root / "codex-ran.txt").exists())
+        self.assertTrue((dest / "result.md").is_file())
+        self.assertFalse((self.root / "result.md").exists())
+        self.assertFalse((dest / ".team" / "orchestrator").exists())
+        handle = self.root / ".team" / "orchestrator" / f"{parsed['handle']}.json"
+        self.assertTrue(handle.is_file())
+        self.assertFalse(str(handle.resolve()).startswith(str(dest)))
 
     def test_launch_cwd_is_the_worktree(self) -> None:
         write_work(
@@ -305,6 +348,9 @@ class ClaudeLaunchTest(unittest.TestCase):
             self.assertEqual(seen, "끝")
             self.assertTrue((dest / "result.md").is_file())
             self.assertFalse((self.root / "result.md").exists())
+            self.assertFalse((dest / ".team" / "orchestrator").exists())
+            handle = self.root / ".team" / "orchestrator" / f"{parsed['handle']}.json"
+            self.assertTrue(handle.is_file())
         finally:
             shutil.rmtree(dest, ignore_errors=True)
 
@@ -555,9 +601,13 @@ class GateTest(unittest.TestCase):
         parsed = parse_record(done.stdout)
         self.assertEqual(tuple(parsed), FIELDS)
         self.assertEqual(parsed["state"], "허용")
-        started = run_orch(self.root, "start", "--work", "73", "--running", "0")
-        self.assertEqual(started.returncode, 0, started.stderr)
-        self.assertTrue(parse_record(started.stdout)["handle"].startswith("native-"))
+        dest = place_worktree(self.root, "73")
+        try:
+            started = run_orch(self.root, "start", "--work", "73", "--running", "0")
+            self.assertEqual(started.returncode, 0, started.stderr)
+            self.assertTrue(parse_record(started.stdout)["handle"].startswith("native-"))
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
 
     def test_start_unit_without_go_does_not_open_a_handle(self) -> None:
         write_work(
@@ -579,32 +629,37 @@ class GateTest(unittest.TestCase):
             "- 쓰기 | 읽기 | scripts/b.py | python3 scripts/b_test.py",
             GO,
         )
-        first = run_orch(self.root, "start", "--work", "73")
-        self.assertEqual(first.returncode, 0, first.stderr)
-        parsed = parse_record(first.stdout)
-        self.assertEqual(parsed["state"], "허용")
-        self.assertIn("읽기", parsed["line"])
-        self.assertNotIn("쓰기", parsed["line"])
-        self.assertTrue(parsed["handle"].startswith("native-"))
-        named = run_orch(self.root, "start", "--work", "73", "--unit", "읽기")
-        self.assertEqual(named.returncode, 0, named.stderr)
-        self.assertIn("읽기", parse_record(named.stdout)["line"])
-        nxt = run_orch(
-            self.root,
-            "start",
-            "--work",
-            "73",
-            "--unit",
-            "쓰기",
-            "--finished",
-            "읽기",
-        )
-        self.assertEqual(nxt.returncode, 0, nxt.stderr)
-        self.assertIn("쓰기", parse_record(nxt.stdout)["line"])
-        self.assertTrue(parse_record(nxt.stdout)["handle"].startswith("native-"))
-        admitted = run_orch(self.root, "admit", "--work", "73", "--finished", "읽기")
-        self.assertEqual(admitted.returncode, 0, admitted.stderr)
-        self.assertEqual(parse_record(admitted.stdout)["state"], "허용")
+        dest = place_worktree(self.root, "73")
+        try:
+            first = run_orch(self.root, "start", "--work", "73")
+            self.assertEqual(first.returncode, 0, first.stderr)
+            parsed = parse_record(first.stdout)
+            self.assertEqual(parsed["state"], "허용")
+            self.assertIn("읽기", parsed["line"])
+            self.assertNotIn("쓰기", parsed["line"])
+            self.assertTrue(parsed["handle"].startswith("native-"))
+            named = run_orch(self.root, "start", "--work", "73", "--unit", "읽기")
+            self.assertEqual(named.returncode, 0, named.stderr)
+            self.assertIn("읽기", parse_record(named.stdout)["line"])
+            nxt = run_orch(
+                self.root,
+                "start",
+                "--work",
+                "73",
+                "--unit",
+                "쓰기",
+                "--finished",
+                "읽기",
+            )
+            self.assertEqual(nxt.returncode, 0, nxt.stderr)
+            self.assertIn("쓰기", parse_record(nxt.stdout)["line"])
+            self.assertTrue(parse_record(nxt.stdout)["handle"].startswith("native-"))
+            admitted = run_orch(self.root, "admit", "--work", "73", "--finished", "읽기")
+            self.assertEqual(admitted.returncode, 0, admitted.stderr)
+            self.assertEqual(parse_record(admitted.stdout)["state"], "허용")
+            self.assertFalse((dest / ".team" / "orchestrator").exists())
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
 
 
 def init_repo(path: Path) -> None:
