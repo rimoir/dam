@@ -294,6 +294,11 @@ class ClaudeLaunchTest(unittest.TestCase):
         (dest / "scripts" / "orchestrator_test.py").write_text(
             "raise SystemExit(0)\n", encoding="utf-8"
         )
+        subprocess.run(["git", "init", "-q"], cwd=dest, check=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=dest, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=dest, check=True)
+        subprocess.run(["git", "add", "scripts/orchestrator_test.py"], cwd=dest, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "처음"], cwd=dest, check=True)
         (self.root / ".team" / "sessions" / "780079" / "state.md").write_text(
             "# 상태\n\n## 다음 할 일\n\n결과를 적었다\n",
             encoding="utf-8",
@@ -325,7 +330,7 @@ class ClaudeLaunchTest(unittest.TestCase):
         collected = self._run("collect", "--handle", parsed["handle"])
         self.assertEqual(collected.returncode, 0, collected.stderr)
         done = parse_record(collected.stdout)
-        self.assertEqual(done["state"], "성공")
+        self.assertEqual(done["state"], "검증 통과")
         self.assertTrue(done["line"].startswith("PASS"))
         argv = (self.root / "claude-argv.txt").read_text(encoding="utf-8")
         self.assertIn("--max-turns", argv)
@@ -1069,7 +1074,7 @@ class CheckOutsideTest(unittest.TestCase):
         finally:
             shutil.rmtree(dest, ignore_errors=True)
         done = parse_record(collected.stdout)
-        self.assertEqual(done["state"], "성공")
+        self.assertEqual(done["state"], "검증 통과")
         self.assertTrue(done["line"].startswith("PASS"))
         self.assertEqual(message, "처음")
         self.assertNotIn(".team/sessions/780098/result.md", names)

@@ -13,10 +13,13 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
@@ -213,7 +216,7 @@ def worker_cwd(root: Path, unit: str) -> Path | str:
 
 def worker_prompt(root: Path, unit: str) -> str:
     owner = work_owning_unit(root, unit)
-    name, dep, files, check = unit, "없음", "", ""
+    name, dep, files, _check = unit, "없음", "", ""
     work = ""
     if owner and owner != "*":
         work = owner
@@ -225,18 +228,33 @@ def worker_prompt(root: Path, unit: str) -> str:
                 units = ()
             for item in units:
                 if item[0] == unit:
-                    name, dep, files, check = item
+                    name, dep, files, _check = item
                     break
     where = f".team/sessions/{work}/result.md" if work else "result.md"
     return (
         f"단위: {name}\n"
         f"의존: {dep}\n"
         f"파일: {files}\n"
-        f"검증: {check}\n"
         f"결과 칸은 {where}의 ## 결과 절에만 쓴다. "
+        "수정한 내용만 그 절에 적는다. "
         "그 절의 첫 줄은 PASS, ISSUES, BLOCKED 중 하나로 시작한다. "
         "결정 줄과 승인 줄은 바꾸지 않는다.\n"
     )
+
+
+def trusted_check(root: Path, unit: str) -> str:
+    owner = work_owning_unit(root, unit)
+    if not owner or owner == "*":
+        return ""
+    text = _read_regular(root / ".team" / "sessions" / owner / "task.md") or ""
+    try:
+        units = read_plan_units(text)
+    except (OSError, UnicodeError):
+        return ""
+    for name, _dep, _files, check in units:
+        if name == unit:
+            return check
+    return ""
 
 
 def _text(path: Path) -> str:
@@ -828,6 +846,7 @@ def start(root: Path, unit: str) -> dict[str, str]:
         )
     if name == "native":
         extra["tree"] = json.dumps(snapshot_tree(cwd), ensure_ascii=False)
+        extra["check"] = trusted_check(root, unit)
         if owner and owner != "*":
             _save_note_originals(root, record["handle"], cwd, owner)
         launched = _launch_claude(root, record["handle"], unit, cwd)
@@ -989,6 +1008,119 @@ def _problem(root: Path, loaded: dict[str, str], handle: str, reason: str) -> di
     return record
 
 
+def _overlay_result(cwd: Path, owner: str, copy: Path) -> None:
+    if not owner or owner == "*":
+        return
+    src = cwd / ".team" / "sessions" / owner / "result.md"
+    try:
+        info = src.lstat()
+    except OSError:
+        return
+    if not stat.S_ISREG(info.st_mode):
+        return
+    text = _read_regular(src)
+    if text is None:
+        return
+    dest = copy / ".team" / "sessions" / owner / "result.md"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(text, encoding="utf-8")
+
+
+def _isolate_script(real_home: str, empty_home: str, tmp_dir: str) -> str:
+    home = shlex.quote(real_home)
+    root_home = shlex.quote("/root")
+    empty = shlex.quote(empty_home)
+    temp = shlex.quote(tmp_dir)
+    return (
+        "#!/bin/sh\n"
+        f"mount -t tmpfs tmpfs {home} || exit 78\n"
+        f"if [ -d {root_home} ]; then mount -t tmpfs tmpfs {root_home} || exit 78; fi\n"
+        f"exec env -i PATH=/usr/bin:/bin HOME={empty} TMPDIR={temp} \"$@\"\n"
+    )
+
+
+def run_disposable_check(cwd: Path, command: str, owner: str) -> tuple[str, str]:
+    text = command.strip()
+    if not text or "\x00" in text:
+        return "검증 실패", "검증 명령이 없다"
+    if shutil.which("unshare") is None or shutil.which("timeout") is None:
+        return "검증 실패", "네트워크를 막을 수 없다"
+    probe = subprocess.run(
+        ["unshare", "-rmn", "true"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        return "검증 실패", "네트워크를 막을 수 없다"
+    copy = Path(tempfile.mkdtemp(prefix="orch-verify-"))
+    try:
+        archived = subprocess.run(
+            ["git", "-C", str(cwd), "archive", "--format=tar", "HEAD"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if archived.returncode != 0 or not archived.stdout:
+            return "검증 실패", "커밋 트리를 꺼내지 못했다"
+        extracted = subprocess.run(
+            ["tar", "-x", "-C", str(copy)],
+            input=archived.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if extracted.returncode != 0:
+            return "검증 실패", "커밋 트리를 꺼내지 못했다"
+        _overlay_result(cwd, owner, copy)
+        empty_home = copy / "empty-home"
+        empty_tmp = copy / "empty-tmp"
+        empty_home.mkdir()
+        empty_tmp.mkdir()
+        wrapper = copy / "isolate"
+        wrapper.write_text(
+            _isolate_script(str(Path.home()), str(empty_home), str(empty_tmp)),
+            encoding="utf-8",
+        )
+        wrapper.chmod(0o755)
+        proc = subprocess.Popen(
+            [
+                "timeout",
+                "-k",
+                "2",
+                "30",
+                "unshare",
+                "-rmn",
+                str(wrapper),
+                "sh",
+                "-c",
+                text,
+            ],
+            cwd=copy,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        try:
+            out, err = proc.communicate(timeout=40)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGTERM)
+            out, err = proc.communicate()
+            return "검증 실패", "시간이 다 됐다"
+        code = proc.returncode
+        if code == 78:
+            return "검증 실패", "홈을 가리지 못했다"
+        if code == 124:
+            return "검증 실패", "시간이 다 됐다"
+        if code == 0:
+            return "검증 통과", ""
+        tail = _escape_reason_line((out or "") + (err or ""))
+        return "검증 실패", tail or "검증이 실패했다"
+    finally:
+        shutil.rmtree(copy, ignore_errors=True)
+
+
 def collect(root: Path, handle: str) -> dict[str, str]:
     polled = poll(root, handle)
     if polled["ok"] != "예" or polled["state"] != "끝":
@@ -1044,10 +1176,13 @@ def collect(root: Path, handle: str) -> dict[str, str]:
     except ValueError:
         code = 1
     kind = judge(code, line, next_action_updated(_state_text(root, cwd, owner)))
+    reason = ""
+    if kind == "성공":
+        kind, reason = run_disposable_check(cwd, loaded.get("check", ""), owner)
     stamp = _read_regular(_store(root) / f"{handle}.first")
     if stamp and stamp.strip():
         loaded["first_event"] = stamp.strip()
-    record = blank(ok="예", handle=handle, state=kind, line=line, reason="")
+    record = blank(ok="예", handle=handle, state=kind, line=line, reason=reason)
     loaded.update(record)
     _write(root, loaded)
     return record
