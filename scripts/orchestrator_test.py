@@ -568,6 +568,102 @@ class SpacedUnitTest(unittest.TestCase):
         self.assertEqual(parsed["handle"].count("native-"), 2)
 
 
+class NoteGuardTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        write_work(
+            self.root,
+            "780091",
+            "- 맡은단위 | 없음 | scripts/a.py | python3 scripts/a_test.py\n"
+            "- 다른단위 | 없음 | scripts/b.py | python3 scripts/b_test.py",
+            GO,
+        )
+        (self.root / ".team" / "sessions" / "780091" / "state.md").write_text(
+            "# 상태\n\n## 결정\n\n- 비밀결정문장\n\n## 다음 할 일\n\n그대로\n",
+            encoding="utf-8",
+        )
+        bindir = self.root / "bin"
+        bindir.mkdir()
+        (bindir / "claude").write_text(
+            "#!/bin/sh\n"
+            'printf \'%s\\n\' "$*" > "$ORCH_ARGV"\n'
+            'mkdir -p .team/sessions/780091\n'
+            'printf \'%s\\n\' \'# 상태\' \'\' \'## 결정\' \'\' \'- 비밀결정문장\' \'- 워커결정\' '
+            '> .team/sessions/780091/state.md\n'
+            'printf \'%s\\n\' \'2026-11-27T00:00:00Z Claude Code go 워커승인\' '
+            '> .team/sessions/780091/log.md\n'
+            'if [ -n "$NOTE_ROOT" ]; then\n'
+            '  printf \'%s\\n\' \'- 워커결정\' >> "$NOTE_ROOT/.team/sessions/780091/state.md"\n'
+            '  printf \'%s\\n\' \'2026-11-27T00:00:00Z Claude Code go 워커승인\' '
+            '>> "$NOTE_ROOT/.team/sessions/780091/log.md"\n'
+            'fi\n'
+            'printf \'%s\\n\' \'# 결과\' \'\' \'## 결과\' \'\' \'PASS 위조\' > result.md\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        (bindir / "claude").chmod(0o755)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["NOTE_ROOT"] = str(self.root)
+        env["ORCH_ARGV"] = str(self.root / "prompt.txt")
+        env["ORCH_CLAUDE"] = str(self.root / "bin" / "claude")
+        env["PATH"] = str(self.root / "bin") + os.pathsep + env.get("PATH", "")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        return subprocess.run(
+            ["python3", str(SCRIPT), *args],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_changed_decision_or_approval_is_not_accepted(self) -> None:
+        dest = place_worktree(self.root, "780091")
+        try:
+            started = self._run("start", "--unit", "맡은단위")
+            self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+            parsed = parse_record(started.stdout)
+            seen = ""
+            for _ in range(40):
+                polled = self._run("poll", "--handle", parsed["handle"])
+                seen = parse_record(polled.stdout)["state"]
+                if seen == "끝":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(seen, "끝")
+            collected = self._run("collect", "--handle", parsed["handle"])
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
+        self.assertEqual(collected.returncode, 0, collected.stderr)
+        done = parse_record(collected.stdout)
+        self.assertEqual(done["state"], "문제")
+        self.assertEqual(done["line"], "")
+        self.assertIn("워커결정", done["reason"])
+        self.assertIn("워커승인", done["reason"])
+        prompt = (self.root / "prompt.txt").read_text(encoding="utf-8")
+        self.assertIn("맡은단위", prompt)
+        self.assertIn("scripts/a.py", prompt)
+        self.assertNotIn("다른단위", prompt)
+        self.assertNotIn("비밀결정문장", prompt)
+        root_state = (
+            self.root / ".team" / "sessions" / "780091" / "state.md"
+        ).read_text(encoding="utf-8")
+        root_log = (
+            self.root / ".team" / "sessions" / "780091" / "log.md"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("워커결정", root_state)
+        self.assertNotIn("워커승인", root_log)
+        self.assertIn("비밀결정문장", root_state)
+        later = self._run("admit", "--work", "780091", "--unit", "다른단위")
+        self.assertNotIn("워커승인", later.stdout)
+
+
 class GateTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
