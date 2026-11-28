@@ -14,7 +14,7 @@
 
 이슈 라벨을 바꾸거나 이슈를 직접 닫지 않는다. main이나 다른 브랜치로 push하지 않는다. force push를 하지 않는다.
 
-워커 결과의 push는 `python3 scripts/team-session.py worker-push`다. HR P 승인 기록 줄이 있고, 현재 브랜치와 대상이 그 작업 브랜치(끝이 이슈 번호)일 때만 `git push`를 부른다. main, 다른 브랜치, force는 이유를 내고 거부한다. PR은 사람이 치는 `pull`과 같은 `open_work_pr`를 호출한다. 그 함수가 실패하면 log.md는 바이트 그대로다. 날 `git push`는 이 가드가 막지 못한다. 그 경계는 https://github.com/rimoir/dam/issues/88 이다.
+워커 결과의 push는 `python3 scripts/team-session.py worker-push`다. HR P 승인 기록 줄이 있고, 현재 브랜치가 그 작업 브랜치일 때만 `git push`를 부른다. 대상은 현재 브랜치 이름과 같아야 한다. 호출자가 준 문자열은 refspec으로 넘기지 않고, 가드가 `refs/heads/<현재 브랜치>:refs/heads/<현재 브랜치>`만 만든다. `+`와 force 옵션은 없다. main, 다른 브랜치, force는 이유를 내고 거부한다. PR은 사람이 치는 `pull`과 같은 `open_work_pr`를 호출한다. 그 함수가 실패하면 log.md는 바이트 그대로다. 날 `git push`는 이 가드가 막지 못한다. 그 경계는 https://github.com/rimoir/dam/issues/88 이다.
 
 두 보안 결정. 워커에게 처음부터 push, PR, 머지 도구를 준다. HR P가 2026-11-26 12:47 KST(Asia/Seoul)에 정한 문장이다.
 

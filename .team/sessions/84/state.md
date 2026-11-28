@@ -4,7 +4,7 @@
 
 ## 지금 상태
 
-worker-push가 승인된 작업 브랜치만 push하고 open_work_pr로 PR을 연다. 거부 이유는 승인 없음, 다른 브랜치, main, force다.
+worker-push는 호출자 문자열을 git에 넘기지 않는다. 대상이 현재 브랜치와 같을 때만 refs/heads 쌍을 push한다.
 
 ## 결정
 

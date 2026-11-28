@@ -1,0 +1,16 @@
+===== 성공 =====
+https://github.com/rimoir/dam/pull/99
+EXIT:0
+--- git ---
+-C /tmp/tmp.crLS1nFboX push origin refs/heads/cursor/84:refs/heads/cursor/84
+===== +cursor/84 =====
+대상이 현재 브랜치가 아니다
+EXIT:1
+===== +refs/heads/cursor/84 =====
+대상이 현재 브랜치가 아니다
+EXIT:1
+===== other/84 =====
+대상이 현재 브랜치가 아니다
+EXIT:1
+--- git after refusals ---
+-C /tmp/tmp.crLS1nFboX push origin refs/heads/cursor/84:refs/heads/cursor/84

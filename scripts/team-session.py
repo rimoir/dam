@@ -57,6 +57,7 @@ from session_context import (  # noqa: E402
     set_mode,
     text_line_errors,
     worker_push_block,
+    worker_push_refspec,
 )
 
 ISSUE_ID = re.compile(r"^[0-9]+$")
@@ -268,19 +269,18 @@ def run_worker_push(
     log_path = root / ".team" / "sessions" / work_id / "log.md"
     if not log_path.is_file():
         raise SystemExit(f"log.md가 없다: {work_id}")
-    branch = current_branch(root)
-    chosen = target.strip() or branch
+    branch = current_branch(root).strip()
     reason = worker_push_block(
         log_path.read_text(encoding="utf-8"),
         branch,
         work_id,
-        chosen,
+        target,
         force,
     )
     if reason:
         raise SystemExit(reason)
     done = subprocess.run(
-        ["git", "-C", str(root), "push", "origin", chosen],
+        ["git", "-C", str(root), "push", "origin", worker_push_refspec(branch)],
         check=False,
         capture_output=True,
         text=True,
