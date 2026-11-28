@@ -672,14 +672,20 @@ def install_fake_git(root: Path) -> Path:
 import os
 import sys
 
-log_path = os.environ.get("GIT_LOG")
-if log_path:
-    with open(log_path, "a", encoding="utf-8") as handle:
-        handle.write(" ".join(sys.argv[1:]) + "\\n")
-if os.environ.get("GIT_PUSH_FAIL") and "push" in sys.argv[1:]:
-    sys.stderr.write("push failed\\n")
-    sys.exit(1)
-sys.exit(0)
+if "push" in sys.argv[1:]:
+    log_path = os.environ.get("GIT_LOG")
+    if log_path:
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write(" ".join(sys.argv[1:]) + "\\n")
+    if os.environ.get("GIT_PUSH_FAIL"):
+        sys.stderr.write("push failed\\n")
+        sys.exit(1)
+    sys.exit(0)
+real = os.environ.get("GIT_REAL")
+if not real:
+    sys.stderr.write("git가 없다\\n")
+    sys.exit(127)
+os.execv(real, [real, *sys.argv[1:]])
 """,
         encoding="utf-8",
     )
@@ -703,6 +709,7 @@ def worker_push(root: Path, *args: str, gh_fail: str | None = None, branch: str 
     env["GH_LOG"] = str(root / "gh.log")
     env["GH_STDIN"] = str(root / "gh-stdin.txt")
     env["GIT_LOG"] = str(root / "git.log")
+    env["GIT_REAL"] = shutil.which("git") or ""
     env["GITHUB_HEAD_REF"] = branch
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env.pop("GH_FAIL", None)

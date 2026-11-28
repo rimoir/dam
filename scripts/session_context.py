@@ -381,6 +381,21 @@ def log_has_go(text: str) -> bool:
     return _has_go(text)
 
 
+def worker_push_block(log_text: str, branch: str, work_id: str, target: str, force: bool) -> str | None:
+    if force:
+        return "force push는 거부한다"
+    if not _has_go(log_text):
+        return "승인 기록 줄이 없다"
+    if issue_id_from_branch(branch) != work_id:
+        return "현재 브랜치가 작업 브랜치가 아니다"
+    leaf = target.strip().replace("\\", "/").rstrip("/").split("/")[-1]
+    if leaf == "main":
+        return "대상이 main이다"
+    if issue_id_from_branch(target) != work_id:
+        return "대상이 작업 브랜치가 아니다"
+    return None
+
+
 def plan_check(root: Path, work_id: str) -> tuple[list[str], str]:
     if WORK_ID.fullmatch(work_id) is None:
         return [f"작업ID가 이슈 번호가 아니다: {work_id}"], ""
