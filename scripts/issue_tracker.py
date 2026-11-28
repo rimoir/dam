@@ -48,8 +48,8 @@ _TOKEN = re.compile(
 )
 _USERINFO = re.compile(r"https://[^/\s]+@")
 _NAMED_SECRET = re.compile(
-    r"(?i)(?<![\w])"
-    r"((?:[\w]+[-_])*(?:password|secret|token)(?:[-_][\w]+)*)"
+    r"(?i)(?<!\S)"
+    r"([^\s=:]*(?:password|secret|token)[^\s=:]*)"
     r"(\s*[:=]\s*)"
     r"(\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|\S+)"
 )

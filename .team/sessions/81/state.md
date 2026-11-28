@@ -4,7 +4,7 @@
 
 ## 지금 상태
 
-verify-record가 PASS만 남긴다. GITHUB_TOKEN, DB_PASSWORD, api_token, client_secret과 이스케이프된 따옴표 값은 가림 한 곳에서 지운다. 값 없는 token 문장은 그대로다.
+verify-record가 PASS만 남긴다. 키 이름에 password, secret, token이 들어가면 그 값을 가림 한 곳에서 지운다. 값 없는 문장은 그대로다.
 
 ## 결정
 
