@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -55,6 +56,8 @@ from session_context import (  # noqa: E402
     plan_check,
     set_mode,
     text_line_errors,
+    worker_push_block,
+    worker_push_refspec,
 )
 
 ISSUE_ID = re.compile(r"^[0-9]+$")
@@ -249,6 +252,45 @@ def refresh_board(root: Path, tracker=None) -> None:
         handle.truncate()
 
 
+def run_worker_push(
+    root: Path,
+    work_id: str,
+    title: str,
+    tool: str,
+    target: str,
+    force: bool,
+) -> str:
+    if tool not in ("Claude Code", "Codex"):
+        raise SystemExit("도구는 Claude Code 또는 Codex다")
+    if not ISSUE_ID.fullmatch(work_id):
+        raise SystemExit("작업ID가 이슈 번호가 아니다")
+    if not title.strip():
+        raise SystemExit("제목이 없다")
+    log_path = root / ".team" / "sessions" / work_id / "log.md"
+    if not log_path.is_file():
+        raise SystemExit(f"log.md가 없다: {work_id}")
+    branch = current_branch(root).strip()
+    reason = worker_push_block(
+        log_path.read_text(encoding="utf-8"),
+        branch,
+        work_id,
+        target,
+        force,
+    )
+    if reason:
+        raise SystemExit(reason)
+    done = subprocess.run(
+        ["git", "-C", str(root), "push", "origin", worker_push_refspec(branch)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if done.returncode != 0:
+        detail = (done.stderr or done.stdout or "git push가 실패했다").strip()
+        raise SystemExit(detail or "git push가 실패했다")
+    return open_work_pr(root, work_id, title, tool)
+
+
 def open_work_pr(root: Path, work_id: str, title: str, tool: str, tracker=None) -> str:
     if tool not in ("Claude Code", "Codex"):
         raise SystemExit("도구는 Claude Code 또는 Codex다")
@@ -361,6 +403,12 @@ def main(argv: list[str] | None = None) -> int:
     verify_session.add_argument("--base", required=True)
     verify_session.add_argument("--head", required=True)
     verify_session.add_argument("--checks", required=True)
+    ship = sub.add_parser("worker-push", help="승인된 작업 브랜치로만 push하고 PR을 연다.")
+    ship.add_argument("work_id")
+    ship.add_argument("--title", required=True)
+    ship.add_argument("--tool", required=True)
+    ship.add_argument("--target", default="")
+    ship.add_argument("--force", action="store_true")
     pull = sub.add_parser("pull", help="사람이 명령했을 때만 PR을 연다.")
     pull.add_argument("work_id")
     pull.add_argument("--title", required=True)
@@ -437,6 +485,16 @@ def main(argv: list[str] | None = None) -> int:
             if err:
                 sys.stderr.write(err if err.endswith("\n") else err + "\n")
             return code
+        elif args.command == "worker-push":
+            url = run_worker_push(
+                root,
+                args.work_id,
+                args.title,
+                args.tool,
+                args.target,
+                args.force,
+            )
+            sys.stdout.write(url + "\n")
         elif args.command == "pull":
             sys.stdout.write(open_work_pr(root, args.work_id, args.title, args.tool) + "\n")
         elif args.command == "board":

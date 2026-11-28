@@ -1,0 +1,24 @@
+===== 승인된 작업 브랜치 =====
+https://github.com/rimoir/dam/pull/99
+EXIT:0
+--- git ---
+-C /tmp/tmp.y3B5TbOV3j push origin worker/84
+--- gh body ---
+https://github.com/rimoir/dam/issues/84
+--- log ---
+# 로그 84
+
+2026-11-26T00:00:00Z Codex go 계획 승인
+2026-11-28T16:43:45Z Codex push https://github.com/rimoir/dam/pull/99
+===== 승인 없음 =====
+승인 기록 줄이 없다
+EXIT:1
+===== 다른 브랜치 =====
+현재 브랜치가 작업 브랜치가 아니다
+EXIT:1
+===== main =====
+대상이 main이다
+EXIT:1
+===== force =====
+force push는 거부한다
+EXIT:1

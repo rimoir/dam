@@ -381,6 +381,49 @@ def log_has_go(text: str) -> bool:
     return _has_go(text)
 
 
+_PLAIN_BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+
+
+def _names_main(target: str) -> bool:
+    text = target.strip().replace("\\", "/")
+    if not text:
+        return False
+    leaf = text.rstrip("/").split("/")[-1]
+    return leaf.split(":")[-1] == "main"
+
+
+def plain_work_branch(name: str, work_id: str) -> bool:
+    if not _PLAIN_BRANCH.fullmatch(name):
+        return False
+    if ".." in name or "//" in name or "@{" in name:
+        return False
+    if name.startswith("/") or name.endswith("/") or name.endswith("."):
+        return False
+    return issue_id_from_branch(name) == work_id
+
+
+def worker_push_refspec(branch: str) -> str:
+    return f"refs/heads/{branch}:refs/heads/{branch}"
+
+
+def worker_push_block(log_text: str, branch: str, work_id: str, target: str, force: bool) -> str | None:
+    if force:
+        return "force push는 거부한다"
+    if not _has_go(log_text):
+        return "승인 기록 줄이 없다"
+    current = branch.strip()
+    if _names_main(current) or not plain_work_branch(current, work_id):
+        if _names_main(current):
+            return "대상이 main이다"
+        return "현재 브랜치가 작업 브랜치가 아니다"
+    chosen = target.strip() or current
+    if _names_main(chosen):
+        return "대상이 main이다"
+    if chosen != current:
+        return "대상이 현재 브랜치가 아니다"
+    return None
+
+
 def plan_check(root: Path, work_id: str) -> tuple[list[str], str]:
     if WORK_ID.fullmatch(work_id) is None:
         return [f"작업ID가 이슈 번호가 아니다: {work_id}"], ""
