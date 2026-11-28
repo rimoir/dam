@@ -26,6 +26,8 @@
 
 통과한 검증만 노트에 남긴다. `python3 scripts/team-session.py verify-record --work <작업ID> --tool <Claude Code|Codex> --model <모델> --head <SHA> --text <결과>`다. 판정이 `PASS`일 때만 그 작업의 result.md `## 결과` 한 줄과 `## 증거 요약`, log.md 한 줄을 쓴다. 로그 형식은 `YYYY-MM-DDTHH:MM:SSZ 도구 종류 내용`이고, 종류는 `종료`, 내용은 `검증 PASS 모델 <모델> 헤드 <짧은 SHA>`다. 이 줄은 승인으로 세지 않는다. `ISSUES`, `BLOCKED`, 형식 불량, 헤드 불일치는 파일을 바꾸지 않는다. 토큰은 기존 가림을 거친다. 로그가 200줄을 넘기면 기존 `rotate`로 앞부분을 옮긴다. 훅과 격리는 바꾸지 않는다. PR 코멘트는 이 명령 밖이다. 결정은 `docs/adr/0012-verification-record.md`다.
 
+검증 코멘트가 검토 기록인지는 `python3 scripts/team-session.py verify-comment --head <지금 SHA> --text <코멘트>`다. 코멘트는 네 줄이다. `세션 id:`, `헤드 SHA:`, `확인 방법:`, `증거 요약:`. 세션 id가 없거나 형식이 틀리거나, 헤드 SHA나 확인 방법이나 증거가 없으면 `아님`이고 검토 기록이 아니다. 헤드 SHA가 지금 PR 헤드와 다르면 `무효`다. 넷이 있고 헤드가 같으면 `검토 기록`이고 종료 0이다. 이 판정은 코멘트 문자열과 기대 헤드만 보고 gh를 부르지 않는다. PR에 올리는 쓰기는 검토 기록일 때만, 사람이 그 쓰기를 명령했을 때만 `scripts/issue_tracker.py`를 통한다. 훅과 격리는 바꾸지 않는다. 결정은 `docs/adr/0013-verification-comment.md`다.
+
 `python3 scripts/team-session.py rotate <작업ID>`는 log.md가 200줄을 넘으면 앞부분을 `.team/sessions/<작업ID>/log/001.md`로 옮기고, log.md에는 최근 줄과 `이전: log/001.md`만 남긴다. 옮긴 내용은 바꾸지 않는다. 다시 넘으면 `002.md`다. `python3 scripts/team-session.py check`는 상태 파일 2,000자, 시작 주입 4,000자, 로그 200줄, 규칙 원본 50줄, 모드 명령 본문 40줄을 넘기면 실패한다. 두 모드 명령 본문이 달라도 실패한다. `notes.md`만 있는 폴더는 보지 않는다. 로그 200줄도 측정 전 임시 상한이다.
 
 ## M4 파일 레이어

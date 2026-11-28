@@ -38,6 +38,7 @@ from verify_report import (  # noqa: E402
     take_snapshot,
     verdict_word,
 )
+from verify_comment import judge_verify_comment  # noqa: E402
 from verify_session import open_verify_session  # noqa: E402
 from session_context import (  # noqa: E402
     current_branch,
@@ -377,6 +378,9 @@ def main(argv: list[str] | None = None) -> int:
     record.add_argument("--model", required=True)
     record.add_argument("--head", required=True)
     record.add_argument("--text", required=True)
+    comment = sub.add_parser("verify-comment", help="검증 코멘트가 검토 기록인지 판정한다.")
+    comment.add_argument("--head", required=True)
+    comment.add_argument("--text", required=True)
     judge = sub.add_parser("verify-judge", help="검증 결과 문자열을 판정한다.")
     judge.add_argument("--head", required=True)
     judge.add_argument("--text", required=True)
@@ -457,6 +461,10 @@ def main(argv: list[str] | None = None) -> int:
             )
             sys.stdout.write(out)
             return code
+        elif args.command == "verify-comment":
+            word = judge_verify_comment(args.text, args.head)
+            sys.stdout.write(word + "\n")
+            return 0 if word == "검토 기록" else 1
         elif args.command == "verify-judge":
             word = verdict_word(args.text, args.head)
             sys.stdout.write(word + "\n")
