@@ -1,0 +1,13 @@
+F
+======================================================================
+FAIL: test_named_secret_values_are_not_stored (__main__.VerifyRecordTest.test_named_secret_values_are_not_stored)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1671, in test_named_secret_values_are_not_stored
+    self.assertNotIn(secret, body, evidence)
+AssertionError: 'hunter2' unexpectedly found in '# 결과 81\n\n## 결과\n\nPASS 헤드 ccccccc 모델 codex-test\n\n## 증거 요약\n\n증거 password=hunter2\n\n## 교훈 후보\n\n- 그대로\n' : password=hunter2
+
+----------------------------------------------------------------------
+Ran 1 test in 0.074s
+
+FAILED (failures=1)

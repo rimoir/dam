@@ -1647,6 +1647,31 @@ class VerifyRecordTest(unittest.TestCase):
         self.assertNotIn(token, log)
         self.assertIn("***", body)
 
+    def test_named_secret_values_are_not_stored(self) -> None:
+        samples = (
+            ("password=hunter2", "hunter2"),
+            ("secret: abc", "abc"),
+            ("token=plainvalue", "plainvalue"),
+            ("Password=Hunter2", "Hunter2"),
+            ("SECRET: ABCVALUE", "ABCVALUE"),
+            ("Token=PlainValue", "PlainValue"),
+            ('password = "hunter2"', "hunter2"),
+            ("secret = 'abc'", "abc"),
+            ('token = "plainvalue"', "plainvalue"),
+            ("password:hunter2", "hunter2"),
+            ("secret : abc", "abc"),
+            ("token : plainvalue", "plainvalue"),
+            ('PASSWORD = "hunter two"', "hunter two"),
+        )
+        for evidence, secret in samples:
+            done = self._record(verdict_text("PASS", evidence="증거 " + evidence))
+            self.assertEqual(done.returncode, 0, done.stderr)
+            body = self.result.read_text(encoding="utf-8")
+            log = self.log.read_text(encoding="utf-8")
+            self.assertNotIn(secret, body, evidence)
+            self.assertNotIn(secret, log, evidence)
+            self.assertIn("***", body, evidence)
+
     def test_record_rotates_before_the_log_cap(self) -> None:
         old = [f"2026-11-26T00:00:00Z Codex 시작 옛{i}\n" for i in range(LOG_LINE_LIMIT)]
         self.log.write_text("".join(old), encoding="utf-8")
