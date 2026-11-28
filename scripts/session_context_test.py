@@ -1742,5 +1742,65 @@ class VerifyRecordTest(unittest.TestCase):
         self.assertNotIn("검증 PASS", archive)
 
 
+COMMENT_HEAD = "a" * 40
+COMMENT_OTHER = "b" * 40
+COMMENT_SESSION = "verify-session-82"
+
+
+def comment_body(
+    session: str | None = COMMENT_SESSION,
+    head: str | None = COMMENT_HEAD,
+    method: str | None = "python3 scripts/session_context_test.py",
+    evidence: str | None = "218건 통과",
+) -> str:
+    lines: list[str] = []
+    if session is not None:
+        lines.append(f"세션 id: {session}")
+    if head is not None:
+        lines.append(f"헤드 SHA: {head}")
+    if method is not None:
+        lines.append(f"확인 방법: {method}")
+    if evidence is not None:
+        lines.append(f"증거 요약: {evidence}")
+    return "\n".join(lines) + "\n"
+
+
+def run_comment(text: str, head: str = COMMENT_HEAD) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["python3", str(SCRIPT), "verify-comment", "--head", head, "--text", text],
+        text=True,
+        capture_output=True,
+    )
+
+
+class VerifyCommentTest(unittest.TestCase):
+    def test_complete_comment_matching_head_is_a_review_record(self) -> None:
+        done = run_comment(comment_body())
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "검토 기록\n")
+
+    def test_missing_session_or_head_is_not_a_review_record(self) -> None:
+        cases = (
+            comment_body(session=None),
+            comment_body(head=None),
+            comment_body(session="bad id"),
+            comment_body(method=None),
+            comment_body(evidence=None),
+            "검토 기록\n",
+        )
+        for text in cases:
+            done = run_comment(text)
+            self.assertEqual(done.stdout, "아님\n", text)
+            self.assertNotEqual(done.returncode, 0, text)
+
+    def test_different_head_is_invalid(self) -> None:
+        done = run_comment(comment_body(head=COMMENT_OTHER))
+        self.assertEqual(done.stdout, "무효\n")
+        self.assertNotEqual(done.returncode, 0)
+        swapped = run_comment(comment_body(), head=COMMENT_OTHER)
+        self.assertEqual(swapped.stdout, "무효\n")
+        self.assertNotEqual(swapped.returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
