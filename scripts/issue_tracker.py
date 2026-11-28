@@ -47,6 +47,9 @@ _TOKEN = re.compile(
     r"(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
 )
 _USERINFO = re.compile(r"https://[^/\s]+@")
+_NAMED_SECRET = re.compile(
+    r"(?i)\b(password|secret|token)\b(\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|\S+)"
+)
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 _ITEM = re.compile(r"^\s*[-*]\s+(?:\[[ xX]\]\s+)?(.+?)\s*$")
 _COVERS = re.compile(r"^\s*(?:[-*]\s+)?Covers:\s*(.+?)\s*$")
@@ -59,9 +62,14 @@ _SLUGS = (
 )
 
 
+def _hide_named(match: re.Match[str]) -> str:
+    return match.group(1) + match.group(2) + "***"
+
+
 def redact(text: str) -> str:
     text = _USERINFO.sub("https://", text)
-    return _TOKEN.sub("***", text)
+    text = _TOKEN.sub("***", text)
+    return _NAMED_SECRET.sub(_hide_named, text)
 
 
 def github_slug(remote_url: str) -> str | None:

@@ -14,7 +14,8 @@ result.md의 `## 결과`는 수거가 읽는 한 줄이다. `PASS 헤드 <7자> 
 
 log.md 한 줄은 기존 `YYYY-MM-DDTHH:MM:SSZ 도구 종류 내용`이다. 종류는 `종료`다. `go`는 승인으로 세므로 쓰지 않는다. 내용 칸은 `검증 PASS 모델 <모델> 헤드 <7자 SHA>`다. 200줄을 넘기면 기존 rotate가 앞부분을 `log/`로 옮긴다. 옮긴 내용은 바꾸지 않는다.
 
-토큰은 `scripts/issue_tracker.py`의 기존 가림을 거친 뒤에 쓴다. 가린 토큰은 노트에 남지 않는다. 새 가림 규칙은 만들지 않는다.
+토큰과 주소 속 비밀번호, 그리고 `password`, `secret`, `token` 이름 뒤의 값은 `scripts/issue_tracker.py`의 가림 한 곳을 거친 뒤에 쓴다. 가린 값은 노트에 남지 않는다.
+이름 없이 그냥 적힌 비밀번호는 범위 밖이다 (https://github.com/rimoir/dam/issues/81#issuecomment-7240213178).
 
 이 명령은 노트를 쓴다. 판정 함수는 그대로 깃과 노트를 읽지 않는다. 워커 수거의 `judge`와 `code-clean`은 바꾸지 않는다. 훅 파일을 열지 않는다. 격리의 마운트와 권한은 바꾸지 않는다. PR 검토 코멘트는 이 결정 밖이다.
 
