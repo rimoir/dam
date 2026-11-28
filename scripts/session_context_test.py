@@ -1674,24 +1674,28 @@ class VerifyRecordTest(unittest.TestCase):
 
     def test_compound_keys_and_escaped_quotes_are_not_stored(self) -> None:
         samples = (
+            ("GITHUB_TOKEN=envtoken", "envtoken"),
+            ("DB_PASSWORD=envpass", "envpass"),
             ("api_token=xyzvalue", "xyzvalue"),
             ("client_secret=secvalue", "secvalue"),
             ("db_password=dbvalue", "dbvalue"),
             ("access-token=accvalue", "accvalue"),
+            ('password="a\\"b"', 'b"'),
             ('password="a\\"zqtail"', "zqtail"),
             ("secret='a\\'sqtail'", "sqtail"),
         )
         for evidence, secret in samples:
-            done = self._record(
-                verdict_text("PASS", evidence="증거 " + evidence),
-                model=evidence,
-            )
-            self.assertEqual(done.returncode, 0, done.stderr)
-            body = self.result.read_text(encoding="utf-8")
-            log = self.log.read_text(encoding="utf-8")
-            self.assertNotIn(secret, body, evidence)
-            self.assertNotIn(secret, log, evidence)
-            self.assertIn("***", body, evidence)
+            with self.subTest(evidence=evidence):
+                done = self._record(
+                    verdict_text("PASS", evidence="증거 " + evidence),
+                    model=evidence,
+                )
+                self.assertEqual(done.returncode, 0, done.stderr)
+                body = self.result.read_text(encoding="utf-8")
+                log = self.log.read_text(encoding="utf-8")
+                self.assertNotIn(secret, body, evidence)
+                self.assertNotIn(secret, log, evidence)
+                self.assertIn("***", body, evidence)
         plain = self._record(verdict_text("PASS", evidence="token 검사 통과"), model="codex-test")
         self.assertEqual(plain.returncode, 0, plain.stderr)
         kept = self.result.read_text(encoding="utf-8")
