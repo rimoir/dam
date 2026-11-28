@@ -24,6 +24,19 @@ from issue_tracker import (  # noqa: E402
     load_tracker,
     redact,
 )
+from verify_report import (  # noqa: E402
+    changed_stamp_paths,
+    compare_stamps,
+    digest_ok,
+    dump_snapshot,
+    expect_matches,
+    load_snapshot,
+    run_isolated_readonly,
+    snapshot_digest,
+    snapshot_outside,
+    take_snapshot,
+    verdict_word,
+)
 from verify_session import open_verify_session  # noqa: E402
 from session_context import (  # noqa: E402
     current_branch,
@@ -307,6 +320,16 @@ def main(argv: list[str] | None = None) -> int:
     mode = sub.add_parser("mode", help="열린 작업 상태 파일 첫 줄의 모드만 바꾼다.")
     mode.add_argument("name", nargs="+")
     sub.add_parser("code-clean", help="코드 파일이 바뀌지 않았는지 읽기만 한다.")
+    judge = sub.add_parser("verify-judge", help="검증 결과 문자열을 판정한다.")
+    judge.add_argument("--head", required=True)
+    judge.add_argument("--text", required=True)
+    readonly = sub.add_parser("verify-readonly", help="작업 폴더 스냅샷을 찍거나 비교한다.")
+    readonly.add_argument("--begin", action="store_true")
+    readonly.add_argument("--end", action="store_true")
+    readonly.add_argument("--isolated", action="store_true")
+    readonly.add_argument("--snapshot", default="")
+    readonly.add_argument("--expect", default="")
+    readonly.add_argument("--command", dest="verify_command", default="")
     plan = sub.add_parser("plan-check", help="기능 계획의 네 칸을 읽기만 한다.")
     plan.add_argument("work_id")
     resume = sub.add_parser("resume", help="이어받기 모드로 바꾸거나 이전 모드로 돌린다.")
@@ -366,6 +389,69 @@ def main(argv: list[str] | None = None) -> int:
             if dirty:
                 print("\n".join(dirty), file=sys.stderr)
                 return 1
+        elif args.command == "verify-judge":
+            word = verdict_word(args.text, args.head)
+            sys.stdout.write(word + "\n")
+            return 0 if word == "PASS" else 1
+        elif args.command == "verify-readonly":
+            if args.isolated:
+                if args.begin or args.end or not args.verify_command.strip() or not args.snapshot:
+                    sys.stdout.write("실패\n")
+                    return 1
+                word = run_isolated_readonly(root, args.verify_command, Path(args.snapshot))
+                sys.stdout.write(word + "\n")
+                return 0 if word == "깨끗" else 1
+            if args.begin == args.end or not args.snapshot:
+                sys.stdout.write("실패\n")
+                return 1
+            snap = Path(args.snapshot)
+            if not snapshot_outside(root, snap):
+                sys.stdout.write("실패\n")
+                return 1
+            if args.begin:
+                try:
+                    data = dump_snapshot(take_snapshot(root)).encode("utf-8")
+                except OSError:
+                    sys.stdout.write("실패\n")
+                    return 1
+                snap.write_bytes(data)
+                sys.stdout.write(snapshot_digest(data) + "\n")
+                return 0
+            if not digest_ok(args.expect.strip()):
+                sys.stdout.write("실패\n")
+                return 1
+            if not snap.is_file():
+                sys.stdout.write("실패\n")
+                return 1
+            try:
+                raw_bytes = snap.read_bytes()
+            except OSError:
+                sys.stdout.write("실패\n")
+                return 1
+            if not expect_matches(raw_bytes, args.expect.strip()):
+                sys.stdout.write("실패\n")
+                return 1
+            try:
+                raw = raw_bytes.decode("utf-8")
+            except UnicodeError:
+                sys.stdout.write("실패\n")
+                return 1
+            before = load_snapshot(raw)
+            if before is None:
+                sys.stdout.write("실패\n")
+                return 1
+            try:
+                after = take_snapshot(root)
+            except OSError:
+                sys.stdout.write("실패\n")
+                return 1
+            word = compare_stamps(before, after)
+            sys.stdout.write(word + "\n")
+            if word == "실패":
+                names = changed_stamp_paths(before, after)
+                if names:
+                    print("\n".join(names), file=sys.stderr)
+            return 0 if word == "깨끗" else 1
         elif args.command == "plan-check":
             errors, notice = plan_check(root, args.work_id)
             if notice:

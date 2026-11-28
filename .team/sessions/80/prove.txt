@@ -1,0 +1,19 @@
+===== PASS =====
+PASS
+EXIT:0
+===== ISSUES =====
+ISSUES
+EXIT:1
+===== BLOCKED =====
+BLOCKED
+EXIT:1
+===== 형식 불량 =====
+실패
+EXIT:1
+===== 읽기 전용 시작 =====
+깨끗
+EXIT:0
+===== 읽기 전용 끝 =====
+실패
+scripts/ok.py
+EXIT:1

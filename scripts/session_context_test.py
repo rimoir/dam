@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -1168,6 +1169,267 @@ class VerifyStartTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn(AUTHOR_MEMO, done.stdout)
         self.assertIn("Codex go", done.stdout)
+
+
+EXPECT_HEAD = "c" * 40
+OTHER_HEAD = "d" * 40
+
+
+def verdict_text(kind: str, head: str = EXPECT_HEAD, method: str = "python3 scripts/session_context_test.py", evidence: str = "64개 통과") -> str:
+    return f"{kind}\n헤드 SHA: {head}\n확인 방법: {method}\n증거 요약: {evidence}\n"
+
+
+def run_judge(text: str, head: str = EXPECT_HEAD) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["python3", str(SCRIPT), "verify-judge", "--head", head, "--text", text],
+        text=True,
+        capture_output=True,
+    )
+
+
+class VerifyVerdictTest(unittest.TestCase):
+    def test_pass_with_head_method_and_evidence_is_pass(self) -> None:
+        done = run_judge(verdict_text("PASS"))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "PASS\n")
+
+    def test_issues_is_kept_and_is_not_pass(self) -> None:
+        done = run_judge(verdict_text("ISSUES", evidence="실패 1개"))
+        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(done.stdout, "ISSUES\n")
+
+    def test_blocked_is_kept_and_is_not_pass(self) -> None:
+        done = run_judge(verdict_text("BLOCKED", evidence="명령을 실행하지 못했다"))
+        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(done.stdout, "BLOCKED\n")
+
+    def test_missing_field_or_different_head_is_not_pass(self) -> None:
+        missing_evidence = "PASS\n헤드 SHA: " + EXPECT_HEAD + "\n확인 방법: python3 scripts/session_context_test.py\n"
+        missing_method = "PASS\n헤드 SHA: " + EXPECT_HEAD + "\n증거 요약: 64개 통과\n"
+        missing_head = "PASS\n확인 방법: python3 scripts/session_context_test.py\n증거 요약: 64개 통과\n"
+        empty_evidence = verdict_text("PASS", evidence="  ")
+        cases = (
+            missing_evidence,
+            missing_method,
+            missing_head,
+            empty_evidence,
+            verdict_text("PASS", head=OTHER_HEAD),
+            "pass\n헤드 SHA: " + EXPECT_HEAD + "\n확인 방법: 명령\n증거 요약: 있다\n",
+        )
+        for text in cases:
+            done = run_judge(text)
+            self.assertNotEqual(done.returncode, 0, text)
+            self.assertEqual(done.stdout, "실패\n", text)
+        wrong = run_judge(verdict_text("PASS"), head=OTHER_HEAD)
+        self.assertEqual(wrong.stdout, "실패\n")
+        self.assertNotEqual(wrong.returncode, 0)
+
+    def test_worker_judge_keeps_its_contract(self) -> None:
+        from orchestrator import judge
+
+        self.assertEqual(judge(0, "PASS 했다", True), "성공")
+        self.assertEqual(judge(0, "ISSUES 있다", True), "문제")
+        self.assertEqual(judge(0, "BLOCKED 막힘", True), "문제")
+        self.assertEqual(judge(0, "PASS 했다", False), "미완")
+
+
+class VerifyReadonlyTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        subprocess.run(["git", "init"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=self.root, check=True)
+        script = self.root / "scripts"
+        script.mkdir()
+        (script / "ok.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "scripts/ok.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=self.root, check=True, capture_output=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+        for name in ("-snap.json", "-missing.json"):
+            Path(self.tmp.name + name).unlink(missing_ok=True)
+
+    def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        return subprocess.run(
+            ["python3", str(SCRIPT), "verify-readonly", *args],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+    def _snap(self) -> Path:
+        return Path(self.tmp.name + "-snap.json")
+
+    def _begin(self, snap: Path) -> str:
+        done = self._run("--begin", "--snapshot", str(snap))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        digest = done.stdout.strip()
+        self.assertEqual(len(digest), 64)
+        self.assertEqual(digest, digest.lower())
+        return digest
+
+    def _end(self, snap: Path, digest: str) -> subprocess.CompletedProcess[str]:
+        return self._run("--end", "--snapshot", str(snap), "--expect", digest)
+
+    def test_clean_tree_is_clean(self) -> None:
+        snap = self._snap()
+        digest = self._begin(snap)
+        end = self._end(snap, digest)
+        self.assertEqual(end.returncode, 0, end.stderr)
+        self.assertEqual(end.stdout, "깨끗\n")
+
+    def test_code_change_during_verification_fails(self) -> None:
+        snap = self._snap()
+        digest = self._begin(snap)
+        (self.root / "scripts" / "ok.py").write_text("x = 2\n", encoding="utf-8")
+        end = self._end(snap, digest)
+        self.assertNotEqual(end.returncode, 0)
+        self.assertEqual(end.stdout, "실패\n")
+        self.assertIn("scripts/ok.py", end.stderr)
+
+    def test_team_notes_stay_clean_and_a_missing_snapshot_fails(self) -> None:
+        snap = self._snap()
+        digest = self._begin(snap)
+        notes = self.root / ".team" / "sessions" / "80"
+        notes.mkdir(parents=True)
+        (notes / "result.md").write_text("노트\n", encoding="utf-8")
+        end = self._end(snap, digest)
+        self.assertEqual(end.returncode, 0, end.stderr)
+        self.assertEqual(end.stdout, "깨끗\n")
+        missing = Path(self.tmp.name + "-missing.json")
+        stale = self._run("--end", "--snapshot", str(missing), "--expect", digest)
+        self.assertNotEqual(stale.returncode, 0)
+        self.assertEqual(stale.stdout, "실패\n")
+
+    def test_reverted_edit_is_not_clean(self) -> None:
+        snap = self._snap()
+        digest = self._begin(snap)
+        path = self.root / "scripts" / "ok.py"
+        original = path.read_text(encoding="utf-8")
+        path.write_text("x = 2\n", encoding="utf-8")
+        path.write_text(original, encoding="utf-8")
+        done = self._end(snap, digest)
+        self.assertEqual(done.stdout, "실패\n", done.stderr)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("scripts/ok.py", done.stderr)
+
+    def test_ignored_untracked_file_is_not_clean(self) -> None:
+        ignore = self.root / ".gitignore"
+        ignore.write_text("ignored.py\n", encoding="utf-8")
+        subprocess.run(["git", "add", ".gitignore"], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "ignore"],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+        )
+        snap = self._snap()
+        digest = self._begin(snap)
+        (self.root / "ignored.py").write_text("hidden\n", encoding="utf-8")
+        done = self._end(snap, digest)
+        self.assertEqual(done.stdout, "실패\n", done.stderr)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("ignored.py", done.stderr)
+
+    def test_missing_snapshot_is_not_clean(self) -> None:
+        missing = Path(self.tmp.name + "-missing.json")
+        done = self._run("--end", "--snapshot", str(missing))
+        self.assertEqual(done.stdout, "실패\n", done.stderr)
+        self.assertNotEqual(done.returncode, 0)
+
+    def test_link_retarget_is_not_clean(self) -> None:
+        link = self.root / "scripts" / "alias.py"
+        link.symlink_to("ok.py")
+        snap = self._snap()
+        digest = self._begin(snap)
+        link.unlink()
+        link.symlink_to("missing.py")
+        done = self._end(snap, digest)
+        self.assertEqual(done.stdout, "실패\n", done.stderr)
+        self.assertIn("scripts/alias.py", done.stderr)
+
+    def test_second_begin_after_edit_is_not_clean(self) -> None:
+        snap = self._snap()
+        digest = self._begin(snap)
+        (self.root / "scripts" / "ok.py").write_text("x = 9\n", encoding="utf-8")
+        self._begin(snap)
+        end = self._end(snap, digest)
+        self.assertEqual(end.stdout, "실패\n", end.stderr)
+        self.assertNotEqual(end.returncode, 0)
+
+    def test_overwritten_snapshot_after_edit_is_not_clean(self) -> None:
+        snap = self._snap()
+        other = Path(self.tmp.name + "-other.json")
+        digest = self._begin(snap)
+        (self.root / "scripts" / "ok.py").write_text("x = 9\n", encoding="utf-8")
+        self._begin(other)
+        snap.write_bytes(other.read_bytes())
+        end = self._end(snap, digest)
+        self.assertEqual(end.stdout, "실패\n", end.stderr)
+        self.assertNotEqual(end.returncode, 0)
+        other.unlink(missing_ok=True)
+
+    def test_bad_expect_is_not_clean(self) -> None:
+        snap = self._snap()
+        digest = self._begin(snap)
+        missing = self._run("--end", "--snapshot", str(snap))
+        self.assertEqual(missing.stdout, "실패\n")
+        upper = self._run("--end", "--snapshot", str(snap), "--expect", digest.upper())
+        self.assertEqual(upper.stdout, "실패\n")
+        short = self._run("--end", "--snapshot", str(snap), "--expect", "ab")
+        self.assertEqual(short.stdout, "실패\n")
+
+    def _need_isolation(self) -> None:
+        from verify_report import isolation_available
+
+        if not isolation_available():
+            self.skipTest("unshare가 없다")
+
+    def test_isolated_rewrite_is_not_clean(self) -> None:
+        self._need_isolation()
+        snap = Path(self.tmp.name + "-snap.json")
+        command = (
+            "printf 'x = 9\\n' > scripts/ok.py; printf hack > "
+            + shlex.quote(str(snap))
+            + " || true"
+        )
+        done = self._run(
+            "--isolated",
+            "--snapshot",
+            str(snap),
+            "--command",
+            command,
+        )
+        self.assertEqual(done.stdout, "실패\n", done.stderr)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertNotIn(b"hack", snap.read_bytes())
+
+    def test_isolated_unchanged_tree_is_clean(self) -> None:
+        self._need_isolation()
+        snap = Path(self.tmp.name + "-snap.json")
+        done = self._run("--isolated", "--snapshot", str(snap), "--command", "true")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "깨끗\n")
+
+    def test_isolated_visible_snapshot_is_not_clean(self) -> None:
+        snap = self.root / "visible.json"
+        snap.write_text("leak\n", encoding="utf-8")
+        done = self._run("--isolated", "--snapshot", str(snap), "--command", "true")
+        self.assertEqual(done.stdout, "실패\n", done.stderr)
+        self.assertNotEqual(done.returncode, 0)
+        snap.unlink(missing_ok=True)
+
+    def test_snapshot_inside_work_is_not_written(self) -> None:
+        inside = self.root / "snap.json"
+        done = self._run("--begin", "--snapshot", str(inside))
+        self.assertEqual(done.stdout, "실패\n")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertFalse(inside.exists())
 
 
 AUTHOR_ID = "author-session-79"

@@ -1,0 +1,17 @@
+===== 되돌림 시작 =====
+찍음
+EXIT:0
+===== 되돌림 끝 =====
+실패
+scripts/ok.py
+EXIT:1
+===== ignored 시작 =====
+찍음
+EXIT:0
+===== ignored 끝 =====
+실패
+ignored.py
+EXIT:1
+===== 없는 스냅샷 =====
+실패
+EXIT:1
