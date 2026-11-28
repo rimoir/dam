@@ -4,7 +4,7 @@
 
 ## 지금 상태
 
-verify-record가 PASS만 result.md와 log.md에 남긴다. 형식 불량과 통과가 아닌 판정은 파일을 바꾸지 않는다. 전체 테스트는 통과했다.
+verify-record가 PASS만 result.md와 log.md에 남긴다. 헤드 6ce4e3d에서 verify-session, verify-readonly, verify-judge를 돌렸고 기록은 남김이다.
 
 ## 결정
 
@@ -15,4 +15,4 @@ verify-record가 PASS만 result.md와 log.md에 남긴다. 형식 불량과 통�
 
 ## 다음 할 일
 
-verify-session, verify-readonly, verify-judge를 이 작업 폴더에 남긴다.
+PR을 열고 #82는 시작하지 않는다.
