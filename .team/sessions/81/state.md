@@ -4,7 +4,7 @@
 
 ## 지금 상태
 
-통과한 검증만 result.md와 log.md에 남기는 실패 검사를 먼저 둔다.
+verify-record가 PASS만 result.md와 log.md에 남긴다. 형식 불량과 통과가 아닌 판정은 파일을 바꾸지 않는다. 전체 테스트는 통과했다.
 
 ## 결정
 
@@ -15,4 +15,4 @@
 
 ## 다음 할 일
 
-실패 검사가 빨간 것을 확인한 뒤 기록 명령을 구현한다.
+verify-session, verify-readonly, verify-judge를 이 작업 폴더에 남긴다.

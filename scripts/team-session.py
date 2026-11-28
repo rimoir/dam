@@ -31,6 +31,7 @@ from verify_report import (  # noqa: E402
     dump_snapshot,
     expect_matches,
     load_snapshot,
+    parse_verify_report,
     run_isolated_readonly,
     snapshot_digest,
     snapshot_outside,
@@ -43,7 +44,9 @@ from session_context import (  # noqa: E402
     limit_errors,
     render_start_context,
     render_verify_start,
+    render_recorded_result,
     rotate_log,
+    verification_log_line,
     verify_start_or_none,
     code_dirty_paths,
     begin_resume,
@@ -282,6 +285,54 @@ def summary_text(root: Path, work_id: str) -> str:
     return text
 
 
+def record_verification(
+    root: Path,
+    work_id: str,
+    tool: str,
+    model: str,
+    head: str,
+    text: str,
+) -> tuple[int, str]:
+    if tool not in ("Claude Code", "Codex"):
+        return 1, "실패\n"
+    model_text = model.strip()
+    if not model_text or "\n" in model or "\r" in model:
+        return 1, "실패\n"
+    if not valid_work_id(work_id):
+        return 1, "실패\n"
+    folder = root / ".team" / "sessions" / work_id
+    result_path = folder / "result.md"
+    log_path = folder / "log.md"
+    if not result_path.is_file() or not log_path.is_file():
+        return 1, "실패\n"
+    word = verdict_word(text, head)
+    if word != "PASS":
+        return 1, word + "\n"
+    report = parse_verify_report(text)
+    if report is None:
+        return 1, "실패\n"
+    safe_model = redact(model_text).strip()
+    safe_evidence = redact(report.evidence).strip()
+    if not safe_model or not safe_evidence or "\n" in safe_model or "\n" in safe_evidence:
+        return 1, "실패\n"
+    rendered = render_recorded_result(
+        result_path.read_text(encoding="utf-8"),
+        f"PASS 헤드 {report.head[:7]} 모델 {safe_model}",
+        safe_evidence,
+    )
+    if rendered is None:
+        return 1, "실패\n"
+    log_raw = log_path.read_text(encoding="utf-8")
+    if log_raw and not log_raw.endswith("\n"):
+        log_raw += "\n"
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    line = verification_log_line(stamp, tool, safe_model, report.head)
+    result_path.write_text(rendered, encoding="utf-8")
+    log_path.write_text(log_raw + line + "\n", encoding="utf-8")
+    rotate_log(root, work_id)
+    return 0, "남김\n"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="작업 노트 폴더를 만든다.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -320,6 +371,12 @@ def main(argv: list[str] | None = None) -> int:
     mode = sub.add_parser("mode", help="열린 작업 상태 파일 첫 줄의 모드만 바꾼다.")
     mode.add_argument("name", nargs="+")
     sub.add_parser("code-clean", help="코드 파일이 바뀌지 않았는지 읽기만 한다.")
+    record = sub.add_parser("verify-record", help="통과한 검증 결과를 노트에 남긴다.")
+    record.add_argument("--work", required=True)
+    record.add_argument("--tool", required=True)
+    record.add_argument("--model", required=True)
+    record.add_argument("--head", required=True)
+    record.add_argument("--text", required=True)
     judge = sub.add_parser("verify-judge", help="검증 결과 문자열을 판정한다.")
     judge.add_argument("--head", required=True)
     judge.add_argument("--text", required=True)
@@ -389,6 +446,17 @@ def main(argv: list[str] | None = None) -> int:
             if dirty:
                 print("\n".join(dirty), file=sys.stderr)
                 return 1
+        elif args.command == "verify-record":
+            code, out = record_verification(
+                root,
+                args.work,
+                args.tool,
+                args.model,
+                args.head,
+                args.text,
+            )
+            sys.stdout.write(out)
+            return code
         elif args.command == "verify-judge":
             word = verdict_word(args.text, args.head)
             sys.stdout.write(word + "\n")
