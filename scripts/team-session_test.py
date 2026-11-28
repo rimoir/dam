@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -693,7 +694,14 @@ os.execv(real, [real, *sys.argv[1:]])
     return bindir
 
 
-def worker_push(root: Path, *args: str, gh_fail: str | None = None, branch: str = "worker/84") -> subprocess.CompletedProcess[str]:
+def worker_push(
+    root: Path,
+    *args: str,
+    gh_fail: str | None = None,
+    branch: str = "worker/84",
+    session: str | None = None,
+    clear_session: bool = False,
+) -> subprocess.CompletedProcess[str]:
     gh_bin = install_pr_gh(root)
     git_bin = install_fake_git(root)
     bindir = root / "shipbin"
@@ -713,6 +721,10 @@ def worker_push(root: Path, *args: str, gh_fail: str | None = None, branch: str 
     env["GITHUB_HEAD_REF"] = branch
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env.pop("GH_FAIL", None)
+    if clear_session or session is not None:
+        env.pop("DAM_SESSION_ID", None)
+    if session is not None:
+        env["DAM_SESSION_ID"] = session
     if gh_fail is not None:
         env["GH_FAIL"] = gh_fail
     return subprocess.run(
@@ -854,6 +866,288 @@ class WorkerPushTest(unittest.TestCase):
             log_lines[0],
             r"^20\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ Codex push https://github.com/rimoir/dam/pull/99$",
         )
+
+
+class WorkerSessionTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        folder = self.root / ".team" / "sessions" / "84"
+        folder.mkdir(parents=True)
+        self.log = folder / "log.md"
+        self.log.write_text(
+            "# 로그 84\n\n2026-11-26T00:00:00Z Codex go 계획 승인\n",
+            encoding="utf-8",
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_missing_session_id_refuses_before_the_pr(self) -> None:
+        before = self.log.read_bytes()
+        result = worker_push(
+            self.root,
+            "84",
+            "--tool",
+            "Codex",
+            "--title",
+            "제목",
+            clear_session=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("세션 id", result.stderr)
+        self.assertEqual(self.log.read_bytes(), before)
+        gh_log = self.root / "gh.log"
+        if gh_log.exists():
+            self.assertNotIn("pr create", gh_log.read_text(encoding="utf-8"))
+
+    def test_bad_session_id_refuses_before_the_pr(self) -> None:
+        before = self.log.read_bytes()
+        result = worker_push(
+            self.root,
+            "84",
+            "--tool",
+            "Codex",
+            "--title",
+            "제목",
+            session="bad id",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("세션 id", result.stderr)
+        self.assertEqual(self.log.read_bytes(), before)
+
+    def test_pull_body_stays_the_issue_link(self) -> None:
+        folder = self.root / ".team" / "sessions" / "31"
+        folder.mkdir(parents=True)
+        (folder / "log.md").write_text("# 로그 31\n\n", encoding="utf-8")
+        result = pull(self.root, "31", "--title", "제목", "--tool", "Codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = (self.root / "gh-stdin.txt").read_text(encoding="utf-8")
+        self.assertEqual(body, "https://github.com/rimoir/dam/issues/31\n")
+        self.assertNotIn("세션 id:", body)
+
+
+MERGE_HEAD = "c" * 40
+OTHER_HEAD = "d" * 40
+AUTHOR_SESSION = "author-session-85"
+VERIFIER_SESSION = "verify-session-85"
+
+
+def review_comment(session: str | None, head: str, evidence: str | None = "218건 통과") -> str:
+    lines: list[str] = []
+    if session is not None:
+        lines.append(f"세션 id: {session}")
+    lines.append(f"헤드 SHA: {head}")
+    lines.append("확인 방법: python3 scripts/session_context_test.py")
+    if evidence is not None:
+        lines.append(f"증거 요약: {evidence}")
+    return "\n".join(lines) + "\n"
+
+
+def check_rows(state: str = "SUCCESS", omit: str | None = None) -> list[dict[str, str]]:
+    rows = []
+    for name in ("python test", "rulesync regen", "gitleaks"):
+        if name == omit:
+            continue
+        bucket = {"SUCCESS": "pass", "FAILURE": "fail", "PENDING": "pending"}[state]
+        rows.append({"name": name, "state": state, "bucket": bucket})
+    return rows
+
+
+def merge_fixture(
+    root: Path,
+    *,
+    head: str = MERGE_HEAD,
+    age_seconds: int = 120,
+    mergeable: str = "MERGEABLE",
+    author: str | None = AUTHOR_SESSION,
+    comments: list[str] | None = None,
+    checks: list[dict[str, str]] | None = None,
+) -> None:
+    created = (datetime.now(timezone.utc) - timedelta(seconds=age_seconds)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    body = "https://github.com/rimoir/dam/issues/85\n"
+    if author is not None:
+        body += f"세션 id: {author}\n"
+    payload = {
+        "headRefOid": head,
+        "createdAt": created,
+        "mergeable": mergeable,
+        "body": body,
+        "comments": [{"body": item} for item in (comments or [])],
+    }
+    (root / "pr.json").write_text(json.dumps(payload), encoding="utf-8")
+    (root / "checks.json").write_text(
+        json.dumps(checks if checks is not None else check_rows()),
+        encoding="utf-8",
+    )
+
+
+def install_merge_gh(root: Path) -> Path:
+    bindir = root / "mergebin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    script = bindir / "gh"
+    script.write_text(
+        """#!/usr/bin/env python3
+import os
+import sys
+
+log_path = os.environ.get("GH_LOG")
+if log_path:
+    with open(log_path, "a", encoding="utf-8") as handle:
+        handle.write(" ".join(sys.argv[1:]) + "\\n")
+args = sys.argv[1:]
+if "view" in args and "pr" in args:
+    sys.stdout.write(open(os.environ["GH_PR_JSON"], encoding="utf-8").read())
+    sys.exit(0)
+if "checks" in args:
+    sys.stdout.write(open(os.environ["GH_CHECKS_JSON"], encoding="utf-8").read())
+    sys.exit(0)
+if "merge" in args:
+    if os.environ.get("GH_FAIL"):
+        sys.stderr.write(os.environ["GH_FAIL"] + "\\n")
+        sys.exit(1)
+    sys.exit(0)
+sys.stderr.write("거절된 gh 호출\\n")
+sys.exit(3)
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return bindir
+
+
+def worker_merge(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    bindir = install_merge_gh(root)
+    env = os.environ.copy()
+    env["TEAM_ROOT"] = str(root)
+    env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+    env["GH_LOG"] = str(root / "gh.log")
+    env["GH_PR_JSON"] = str(root / "pr.json")
+    env["GH_CHECKS_JSON"] = str(root / "checks.json")
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return subprocess.run(
+        ["python3", str(SCRIPT), "worker-merge", *args],
+        cwd=root,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+
+class WorkerMergeTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _run(self, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        merge_fixture(self.root, **kwargs)  # type: ignore[arg-type]
+        return worker_merge(self.root, "99")
+
+    def _gh(self) -> str:
+        path = self.root / "gh.log"
+        return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+    def test_failed_check_does_not_merge(self) -> None:
+        result = self._run(
+            checks=check_rows("FAILURE"),
+            comments=[review_comment(VERIFIER_SESSION, MERGE_HEAD)],
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("검사가 실패했다", result.stderr)
+        self.assertNotIn("merge", self._gh())
+
+    def test_pending_check_does_not_merge(self) -> None:
+        result = self._run(
+            checks=check_rows("PENDING"),
+            comments=[review_comment(VERIFIER_SESSION, MERGE_HEAD)],
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("검사가 진행 중이다", result.stderr)
+        self.assertNotIn("merge", self._gh())
+
+    def test_missing_check_does_not_merge(self) -> None:
+        result = self._run(
+            checks=check_rows(omit="gitleaks"),
+            comments=[review_comment(VERIFIER_SESSION, MERGE_HEAD)],
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("검사가 하나 빠졌다", result.stderr)
+        self.assertIn("gitleaks", result.stderr)
+        self.assertNotIn("merge", self._gh())
+
+    def test_missing_review_does_not_merge(self) -> None:
+        result = self._run(comments=[])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("검증 기록이 없다", result.stderr)
+        self.assertNotIn("merge", self._gh())
+
+    def test_other_head_does_not_merge(self) -> None:
+        result = self._run(comments=[review_comment(VERIFIER_SESSION, OTHER_HEAD)])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("검증한 헤드가 PR 헤드와 다르다", result.stderr)
+        self.assertNotIn("merge", self._gh())
+
+    def test_comment_without_session_does_not_merge(self) -> None:
+        result = self._run(comments=[review_comment(None, MERGE_HEAD)])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("세션 id가 없다", result.stderr)
+        self.assertNotIn("merge", self._gh())
+
+    def test_same_session_does_not_merge(self) -> None:
+        result = self._run(comments=[review_comment(AUTHOR_SESSION, MERGE_HEAD)])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("만든 세션과 같다", result.stderr)
+        self.assertNotIn("merge", self._gh())
+
+    def test_missing_author_session_does_not_merge(self) -> None:
+        result = self._run(
+            author=None,
+            comments=[review_comment(VERIFIER_SESSION, MERGE_HEAD)],
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("만든 세션 id가 없다", result.stderr)
+        self.assertNotIn("merge", self._gh())
+
+    def test_young_pr_does_not_merge(self) -> None:
+        result = self._run(
+            age_seconds=10,
+            comments=[review_comment(VERIFIER_SESSION, MERGE_HEAD)],
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("1분이 지나지 않았다", result.stderr)
+        self.assertNotIn("merge", self._gh())
+
+    def test_conflict_does_not_merge(self) -> None:
+        result = self._run(
+            mergeable="CONFLICTING",
+            comments=[review_comment(VERIFIER_SESSION, MERGE_HEAD)],
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("충돌", result.stderr)
+        self.assertNotIn("merge", self._gh())
+
+    def test_non_record_comment_does_not_merge(self) -> None:
+        result = self._run(comments=[review_comment(VERIFIER_SESSION, MERGE_HEAD, evidence=None)])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("검토 기록이 아니다", result.stderr)
+        self.assertNotIn("merge", self._gh())
+
+    def test_ready_pr_merges_squash_with_head_sha(self) -> None:
+        result = self._run(comments=[review_comment(VERIFIER_SESSION, MERGE_HEAD)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        gh_log = self._gh()
+        self.assertIn("pr merge", gh_log)
+        self.assertIn("--squash", gh_log)
+        self.assertIn("--match-head-commit", gh_log)
+        self.assertIn(MERGE_HEAD, gh_log)
+        self.assertNotIn("issue edit", gh_log)
+        self.assertNotIn("close", gh_log)
+        self.assertNotIn("--add-label", gh_log)
 
 
 class PullLogTest(unittest.TestCase):

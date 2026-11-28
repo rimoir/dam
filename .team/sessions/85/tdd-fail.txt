@@ -1,0 +1,121 @@
+FFFFFFFFFFFFFF.
+======================================================================
+FAIL: test_comment_without_session_does_not_merge (__main__.WorkerMergeTest.test_comment_without_session_does_not_merge)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 1098, in test_comment_without_session_does_not_merge
+    self.assertIn("세션 id가 없다", result.stderr)
+AssertionError: '세션 id가 없다' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,worker-push,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-merge' (choose from 'new', 'summary', 'start-context', 'verify-session', 'worker-push', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+======================================================================
+FAIL: test_conflict_does_not_merge (__main__.WorkerMergeTest.test_conflict_does_not_merge)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 1131, in test_conflict_does_not_merge
+    self.assertIn("충돌", result.stderr)
+AssertionError: '충돌' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,worker-push,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-merge' (choose from 'new', 'summary', 'start-context', 'verify-session', 'worker-push', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+======================================================================
+FAIL: test_failed_check_does_not_merge (__main__.WorkerMergeTest.test_failed_check_does_not_merge)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 1061, in test_failed_check_does_not_merge
+    self.assertIn("검사가 실패했다", result.stderr)
+AssertionError: '검사가 실패했다' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,worker-push,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-merge' (choose from 'new', 'summary', 'start-context', 'verify-session', 'worker-push', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+======================================================================
+FAIL: test_missing_author_session_does_not_merge (__main__.WorkerMergeTest.test_missing_author_session_does_not_merge)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 1113, in test_missing_author_session_does_not_merge
+    self.assertIn("만든 세션 id가 없다", result.stderr)
+AssertionError: '만든 세션 id가 없다' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,worker-push,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-merge' (choose from 'new', 'summary', 'start-context', 'verify-session', 'worker-push', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+======================================================================
+FAIL: test_missing_check_does_not_merge (__main__.WorkerMergeTest.test_missing_check_does_not_merge)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 1079, in test_missing_check_does_not_merge
+    self.assertIn("검사가 하나 빠졌다", result.stderr)
+AssertionError: '검사가 하나 빠졌다' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,worker-push,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-merge' (choose from 'new', 'summary', 'start-context', 'verify-session', 'worker-push', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+======================================================================
+FAIL: test_missing_review_does_not_merge (__main__.WorkerMergeTest.test_missing_review_does_not_merge)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 1086, in test_missing_review_does_not_merge
+    self.assertIn("검증 기록이 없다", result.stderr)
+AssertionError: '검증 기록이 없다' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,worker-push,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-merge' (choose from 'new', 'summary', 'start-context', 'verify-session', 'worker-push', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+======================================================================
+FAIL: test_non_record_comment_does_not_merge (__main__.WorkerMergeTest.test_non_record_comment_does_not_merge)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 1137, in test_non_record_comment_does_not_merge
+    self.assertIn("검토 기록이 아니다", result.stderr)
+AssertionError: '검토 기록이 아니다' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,worker-push,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-merge' (choose from 'new', 'summary', 'start-context', 'verify-session', 'worker-push', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+======================================================================
+FAIL: test_other_head_does_not_merge (__main__.WorkerMergeTest.test_other_head_does_not_merge)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 1092, in test_other_head_does_not_merge
+    self.assertIn("검증한 헤드가 PR 헤드와 다르다", result.stderr)
+AssertionError: '검증한 헤드가 PR 헤드와 다르다' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,worker-push,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-merge' (choose from 'new', 'summary', 'start-context', 'verify-session', 'worker-push', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+======================================================================
+FAIL: test_pending_check_does_not_merge (__main__.WorkerMergeTest.test_pending_check_does_not_merge)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 1070, in test_pending_check_does_not_merge
+    self.assertIn("검사가 진행 중이다", result.stderr)
+AssertionError: '검사가 진행 중이다' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,worker-push,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-merge' (choose from 'new', 'summary', 'start-context', 'verify-session', 'worker-push', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+======================================================================
+FAIL: test_ready_pr_merges_squash_with_head_sha (__main__.WorkerMergeTest.test_ready_pr_merges_squash_with_head_sha)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 1142, in test_ready_pr_merges_squash_with_head_sha
+    self.assertEqual(result.returncode, 0, result.stderr)
+AssertionError: 2 != 0 : usage: team-session.py [-h]
+                       {new,summary,start-context,verify-session,worker-push,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}
+                       ...
+team-session.py: error: argument command: invalid choice: 'worker-merge' (choose from 'new', 'summary', 'start-context', 'verify-session', 'worker-push', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')
+
+
+======================================================================
+FAIL: test_same_session_does_not_merge (__main__.WorkerMergeTest.test_same_session_does_not_merge)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 1104, in test_same_session_does_not_merge
+    self.assertIn("만든 세션과 같다", result.stderr)
+AssertionError: '만든 세션과 같다' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,worker-push,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-merge' (choose from 'new', 'summary', 'start-context', 'verify-session', 'worker-push', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+======================================================================
+FAIL: test_young_pr_does_not_merge (__main__.WorkerMergeTest.test_young_pr_does_not_merge)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 1122, in test_young_pr_does_not_merge
+    self.assertIn("1분이 지나지 않았다", result.stderr)
+AssertionError: '1분이 지나지 않았다' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,worker-push,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-merge' (choose from 'new', 'summary', 'start-context', 'verify-session', 'worker-push', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+======================================================================
+FAIL: test_bad_session_id_refuses_before_the_pr (__main__.WorkerSessionTest.test_bad_session_id_refuses_before_the_pr)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 915, in test_bad_session_id_refuses_before_the_pr
+    self.assertNotEqual(result.returncode, 0)
+AssertionError: 0 == 0
+
+======================================================================
+FAIL: test_missing_session_id_refuses_before_the_pr (__main__.WorkerSessionTest.test_missing_session_id_refuses_before_the_pr)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 897, in test_missing_session_id_refuses_before_the_pr
+    self.assertNotEqual(result.returncode, 0)
+AssertionError: 0 == 0
+
+----------------------------------------------------------------------
+Ran 15 tests in 0.983s
+
+FAILED (failures=14)
