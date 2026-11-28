@@ -663,6 +663,142 @@ def pull(root: Path, *args: str, gh_fail: str | None = None) -> subprocess.Compl
     )
 
 
+def install_fake_git(root: Path) -> Path:
+    bindir = root / "gitbin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    script = bindir / "git"
+    script.write_text(
+        """#!/usr/bin/env python3
+import os
+import sys
+
+log_path = os.environ.get("GIT_LOG")
+if log_path:
+    with open(log_path, "a", encoding="utf-8") as handle:
+        handle.write(" ".join(sys.argv[1:]) + "\\n")
+if os.environ.get("GIT_PUSH_FAIL") and "push" in sys.argv[1:]:
+    sys.stderr.write("push failed\\n")
+    sys.exit(1)
+sys.exit(0)
+""",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return bindir
+
+
+def worker_push(root: Path, *args: str, gh_fail: str | None = None, branch: str = "worker/84") -> subprocess.CompletedProcess[str]:
+    gh_bin = install_pr_gh(root)
+    git_bin = install_fake_git(root)
+    bindir = root / "shipbin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    for name, source in (("gh", gh_bin / "gh"), ("git", git_bin / "git")):
+        dest = bindir / name
+        if dest.exists():
+            dest.unlink()
+        dest.symlink_to(source)
+    env = os.environ.copy()
+    env["TEAM_ROOT"] = str(root)
+    env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+    env["GH_LOG"] = str(root / "gh.log")
+    env["GH_STDIN"] = str(root / "gh-stdin.txt")
+    env["GIT_LOG"] = str(root / "git.log")
+    env["GITHUB_HEAD_REF"] = branch
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.pop("GH_FAIL", None)
+    if gh_fail is not None:
+        env["GH_FAIL"] = gh_fail
+    return subprocess.run(
+        ["python3", str(SCRIPT), "worker-push", *args],
+        cwd=root,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+
+class WorkerPushTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        folder = self.root / ".team" / "sessions" / "84"
+        folder.mkdir(parents=True)
+        self.log = folder / "log.md"
+        self.log.write_text(
+            "# 로그 84\n\n2026-11-26T00:00:00Z Codex go 계획 승인\n",
+            encoding="utf-8",
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _run(self, *args: str, gh_fail: str | None = None, branch: str = "worker/84"):
+        return worker_push(self.root, "84", "--tool", "Codex", "--title", "제목", *args, gh_fail=gh_fail, branch=branch)
+
+    def test_without_approval_does_not_push(self) -> None:
+        self.log.write_text("# 로그 84\n\n2026-11-26T00:00:00Z Codex 시작 노트\n", encoding="utf-8")
+        before = self.log.read_bytes()
+        result = self._run()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("승인 기록 줄이 없다", result.stderr)
+        self.assertFalse((self.root / "git.log").exists())
+        self.assertFalse((self.root / "gh.log").exists())
+        self.assertEqual(self.log.read_bytes(), before)
+
+    def test_other_branch_is_refused(self) -> None:
+        before = self.log.read_bytes()
+        result = self._run(branch="worker/85")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("현재 브랜치가 작업 브랜치가 아니다", result.stderr)
+        self.assertFalse((self.root / "git.log").exists())
+        self.assertEqual(self.log.read_bytes(), before)
+
+    def test_main_target_is_refused(self) -> None:
+        before = self.log.read_bytes()
+        result = self._run("--target", "main")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("대상이 main이다", result.stderr)
+        self.assertFalse((self.root / "git.log").exists())
+        self.assertEqual(self.log.read_bytes(), before)
+
+    def test_force_is_refused(self) -> None:
+        before = self.log.read_bytes()
+        result = self._run("--force")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("force push는 거부한다", result.stderr)
+        self.assertFalse((self.root / "git.log").exists())
+        self.assertEqual(self.log.read_bytes(), before)
+
+    def test_failed_pr_open_leaves_log_bytes(self) -> None:
+        before = self.log.read_bytes()
+        result = self._run(gh_fail="pr create failed")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.log.read_bytes(), before)
+        git_log = (self.root / "git.log").read_text(encoding="utf-8")
+        self.assertIn("push", git_log)
+        self.assertNotIn("--force", git_log)
+        self.assertNotIn(" -f", " " + git_log)
+
+    def test_approved_work_branch_pushes_and_logs_pr(self) -> None:
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        git_log = (self.root / "git.log").read_text(encoding="utf-8")
+        self.assertIn("push origin worker/84", git_log)
+        self.assertNotIn("--force", git_log)
+        body = (self.root / "gh-stdin.txt").read_text(encoding="utf-8")
+        self.assertIn("https://github.com/rimoir/dam/issues/84", body)
+        log_lines = [
+            line
+            for line in self.log.read_text(encoding="utf-8").splitlines()
+            if "pull/99" in line
+        ]
+        self.assertEqual(len(log_lines), 1)
+        self.assertRegex(
+            log_lines[0],
+            r"^20\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ Codex push https://github.com/rimoir/dam/pull/99$",
+        )
+
+
 class PullLogTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()

@@ -1,0 +1,64 @@
+FEFFFF
+======================================================================
+ERROR: test_failed_pr_open_leaves_log_bytes (__main__.WorkerPushTest.test_failed_pr_open_leaves_log_bytes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 777, in test_failed_pr_open_leaves_log_bytes
+    git_log = (self.root / "git.log").read_text(encoding="utf-8")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1029, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1015, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/tmp/tmp5oqlzcja/git.log'
+
+======================================================================
+FAIL: test_approved_work_branch_pushes_and_logs_pr (__main__.WorkerPushTest.test_approved_work_branch_pushes_and_logs_pr)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 784, in test_approved_work_branch_pushes_and_logs_pr
+    self.assertEqual(result.returncode, 0, result.stderr)
+AssertionError: 2 != 0 : usage: team-session.py [-h]
+                       {new,summary,start-context,verify-session,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}
+                       ...
+team-session.py: error: argument command: invalid choice: 'worker-push' (choose from 'new', 'summary', 'start-context', 'verify-session', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')
+
+
+======================================================================
+FAIL: test_force_is_refused (__main__.WorkerPushTest.test_force_is_refused)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 768, in test_force_is_refused
+    self.assertIn("force push는 거부한다", result.stderr)
+AssertionError: 'force push는 거부한다' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-push' (choose from 'new', 'summary', 'start-context', 'verify-session', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+======================================================================
+FAIL: test_main_target_is_refused (__main__.WorkerPushTest.test_main_target_is_refused)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 760, in test_main_target_is_refused
+    self.assertIn("대상이 main이다", result.stderr)
+AssertionError: '대상이 main이다' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-push' (choose from 'new', 'summary', 'start-context', 'verify-session', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+======================================================================
+FAIL: test_other_branch_is_refused (__main__.WorkerPushTest.test_other_branch_is_refused)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 752, in test_other_branch_is_refused
+    self.assertIn("현재 브랜치가 작업 브랜치가 아니다", result.stderr)
+AssertionError: '현재 브랜치가 작업 브랜치가 아니다' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-push' (choose from 'new', 'summary', 'start-context', 'verify-session', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+======================================================================
+FAIL: test_without_approval_does_not_push (__main__.WorkerPushTest.test_without_approval_does_not_push)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 743, in test_without_approval_does_not_push
+    self.assertIn("승인 기록 줄이 없다", result.stderr)
+AssertionError: '승인 기록 줄이 없다' not found in "usage: team-session.py [-h]\n                       {new,summary,start-context,verify-session,pull,board,rotate,check,mode,code-clean,verify-record,verify-comment,verify-judge,verify-readonly,plan-check,resume}\n                       ...\nteam-session.py: error: argument command: invalid choice: 'worker-push' (choose from 'new', 'summary', 'start-context', 'verify-session', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-comment', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')\n"
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.368s
+
+FAILED (failures=5, errors=1)
