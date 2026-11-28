@@ -1672,6 +1672,32 @@ class VerifyRecordTest(unittest.TestCase):
             self.assertNotIn(secret, log, evidence)
             self.assertIn("***", body, evidence)
 
+    def test_compound_keys_and_escaped_quotes_are_not_stored(self) -> None:
+        samples = (
+            ("api_token=xyzvalue", "xyzvalue"),
+            ("client_secret=secvalue", "secvalue"),
+            ("db_password=dbvalue", "dbvalue"),
+            ("access-token=accvalue", "accvalue"),
+            ('password="a\\"zqtail"', "zqtail"),
+            ("secret='a\\'sqtail'", "sqtail"),
+        )
+        for evidence, secret in samples:
+            done = self._record(
+                verdict_text("PASS", evidence="증거 " + evidence),
+                model=evidence,
+            )
+            self.assertEqual(done.returncode, 0, done.stderr)
+            body = self.result.read_text(encoding="utf-8")
+            log = self.log.read_text(encoding="utf-8")
+            self.assertNotIn(secret, body, evidence)
+            self.assertNotIn(secret, log, evidence)
+            self.assertIn("***", body, evidence)
+        plain = self._record(verdict_text("PASS", evidence="token 검사 통과"), model="codex-test")
+        self.assertEqual(plain.returncode, 0, plain.stderr)
+        kept = self.result.read_text(encoding="utf-8")
+        self.assertIn("token 검사 통과", kept)
+        self.assertNotIn("***", kept)
+
     def test_record_rotates_before_the_log_cap(self) -> None:
         old = [f"2026-11-26T00:00:00Z Codex 시작 옛{i}\n" for i in range(LOG_LINE_LIMIT)]
         self.log.write_text("".join(old), encoding="utf-8")
