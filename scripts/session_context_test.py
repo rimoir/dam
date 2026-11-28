@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
@@ -918,6 +919,364 @@ class ResumeModeTest(unittest.TestCase):
         self.assertEqual(failed.returncode, 1)
         self.assertIn("모드 이름이 아니다", failed.stderr)
         self.assertEqual(path.read_text(encoding="utf-8"), before)
+
+
+AUTHOR_MEMO = "작성자 결정 메모: 이 문장은 검증 세션 시작 출력에 넣지 않는다"
+BASE_SHA = "a" * 40
+HEAD_SHA = "b" * 40
+CRITERIA = "완료 기준 문장"
+CHECKS = "python3 scripts/session_context_test.py"
+
+
+def verify_text(
+    criteria: str = CRITERIA,
+    base: str = BASE_SHA,
+    head: str = HEAD_SHA,
+    checks: str = CHECKS,
+) -> str:
+    return f"완료 기준\n{criteria}\nBASE\n{base}\nHEAD\n{head}\n검사 명령\n{checks}\n"
+
+
+def write_author_tree(root: Path) -> None:
+    write_board(root, [board_line("79", "시작")])
+    write_note(
+        root,
+        "79",
+        f"모드: 기능\n## 결정\n{AUTHOR_MEMO}\n",
+        f"2026-11-27T00:00:00Z Codex go {AUTHOR_MEMO}\n",
+    )
+    folder = root / ".team" / "sessions" / "79"
+    (folder / "task.md").write_text(f"## 목표\n{AUTHOR_MEMO}\n", encoding="utf-8")
+    (folder / "result.md").write_text(f"## 결과\n{AUTHOR_MEMO}\n", encoding="utf-8")
+
+
+class VerifyStartTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        write_author_tree(self.root)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _verify(self, *args: str, root: Path | None = None) -> subprocess.CompletedProcess[str]:
+        return run_start(
+            root or self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            CRITERIA,
+            "--base",
+            BASE_SHA,
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            CHECKS,
+            *args,
+            head_ref="work-79",
+        )
+
+    def test_verify_role_prints_only_the_four_inputs(self) -> None:
+        done = self._verify()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, verify_text())
+        self.assertNotIn(AUTHOR_MEMO, done.stdout)
+        self.assertNotIn("TASK-SECRET", done.stdout)
+        self.assertNotIn("RESULT-SECRET", done.stdout)
+        self.assertNotIn("세션", done.stdout)
+        self.assertNotIn(board_line("79", "시작"), done.stdout)
+
+    def test_author_start_keeps_the_memo_and_differs(self) -> None:
+        author = run_start(self.root, head_ref="work-79")
+        verify = self._verify()
+        self.assertEqual(author.returncode, 0, author.stderr)
+        self.assertIn(AUTHOR_MEMO, author.stdout)
+        self.assertIn(board_line("79", "시작"), author.stdout)
+        self.assertEqual(verify.returncode, 0, verify.stderr)
+        self.assertEqual(verify.stdout, verify_text())
+        self.assertNotEqual(author.stdout, verify.stdout)
+        self.assertNotIn(AUTHOR_MEMO, verify.stdout)
+
+    def test_verify_role_does_not_read_notes(self) -> None:
+        bare = self.root / "bare"
+        bare.mkdir()
+        done = self._verify(root=bare)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, verify_text())
+
+    def test_multiline_inputs_stay_intact(self) -> None:
+        criteria = "첫째 조건\n둘째 조건"
+        checks = "python3 scripts/session_context_test.py\npython3 scripts/team-session.py check"
+        done = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            criteria,
+            "--base",
+            BASE_SHA,
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            checks,
+            head_ref="work-79",
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, verify_text(criteria=criteria, checks=checks))
+        self.assertNotIn(AUTHOR_MEMO, done.stdout)
+
+    def test_edges_are_stripped_and_sha_case_is_rejected(self) -> None:
+        done = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            f"  {CRITERIA}\n",
+            "--base",
+            f"  {BASE_SHA}\n",
+            "--head",
+            f"\t{HEAD_SHA}  ",
+            "--checks",
+            f"\n{CHECKS}\n",
+            head_ref="work-79",
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, verify_text())
+        upper = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            CRITERIA,
+            "--base",
+            "A" * 40,
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            CHECKS,
+            head_ref="work-79",
+        )
+        self.assertNotEqual(upper.returncode, 0)
+        self.assertIn("BASE 커밋 SHA가 아니다", upper.stderr)
+        self.assertNotIn(AUTHOR_MEMO, upper.stdout)
+
+    def test_missing_or_foreign_role_inputs_fail(self) -> None:
+        missing = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--base",
+            BASE_SHA,
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            CHECKS,
+            head_ref="work-79",
+        )
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("완료 기준이 없다", missing.stderr)
+        blank = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            "  ",
+            "--base",
+            BASE_SHA,
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            " \n ",
+            head_ref="work-79",
+        )
+        self.assertNotEqual(blank.returncode, 0)
+        self.assertIn("완료 기준이 없다", blank.stderr)
+        short = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            CRITERIA,
+            "--base",
+            "abc",
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            CHECKS,
+            head_ref="work-79",
+        )
+        self.assertIn("BASE 커밋 SHA가 아니다", short.stderr)
+        no_head = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            CRITERIA,
+            "--base",
+            BASE_SHA,
+            "--checks",
+            CHECKS,
+            head_ref="work-79",
+        )
+        self.assertIn("HEAD 커밋 SHA가 없다", no_head.stderr)
+        switched = self._verify("--switch")
+        self.assertNotEqual(switched.returncode, 0)
+        self.assertIn("검증 역할은 로그를 더하지 않는다", switched.stderr)
+        self.assertNotIn(AUTHOR_MEMO, switched.stdout)
+        naked = run_start(self.root, "--criteria", CRITERIA, head_ref="work-79")
+        self.assertNotEqual(naked.returncode, 0)
+        self.assertIn("역할 없이 검증 입력을 넘겼다", naked.stderr)
+        self.assertNotIn(AUTHOR_MEMO, naked.stdout)
+        other = run_start(
+            self.root,
+            "--role",
+            "작성",
+            "--criteria",
+            CRITERIA,
+            "--base",
+            BASE_SHA,
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            CHECKS,
+            head_ref="work-79",
+        )
+        self.assertIn("검증 역할이 아니다", other.stderr)
+
+    def test_over_limit_fails_closed(self) -> None:
+        done = run_start(
+            self.root,
+            "--role",
+            "검증",
+            "--criteria",
+            "x" * INJECT_LIMIT,
+            "--base",
+            BASE_SHA,
+            "--head",
+            HEAD_SHA,
+            "--checks",
+            CHECKS,
+            head_ref="work-79",
+        )
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn(f"검증 시작이 {INJECT_LIMIT}자를 넘는다", done.stderr)
+        self.assertNotIn("xxxx", done.stdout)
+        self.assertNotEqual(done.stdout, SHORTEN_LINE)
+
+    def test_switch_without_role_still_includes_the_memo(self) -> None:
+        done = run_start(self.root, "--switch", head_ref="work-79")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(AUTHOR_MEMO, done.stdout)
+        self.assertIn("Codex go", done.stdout)
+
+
+AUTHOR_ID = "author-session-79"
+
+
+class VerifySessionLaunchTest(unittest.TestCase):
+    def setUp(self) -> None:
+        from verify_session import isolation_available
+
+        if not isolation_available():
+            self.skipTest("unshare가 없다")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        subprocess.run(["git", "init"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=self.root, check=True)
+        script = self.root / "scripts"
+        script.mkdir()
+        (script / "ok.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "scripts/ok.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "checkout", "-b", "cursor/verify-79"],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+        )
+        write_board(self.root, [board_line("79", "시작").replace("dev", AUTHOR_ID)])
+        write_note(
+            self.root,
+            "79",
+            f"모드: 기능\n## 결정\n{AUTHOR_MEMO}\n세션 id: {AUTHOR_ID}\n",
+            f"2026-11-27T00:00:00Z Codex go {AUTHOR_ID}\n",
+        )
+
+    def tearDown(self) -> None:
+        tmp = getattr(self, "tmp", None)
+        if tmp is not None:
+            tmp.cleanup()
+
+    def _hook(self) -> subprocess.CompletedProcess[str]:
+        settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        command = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["CLAUDE_PROJECT_DIR"] = str(ROOT)
+        env["GITHUB_HEAD_REF"] = "cursor/verify-79"
+        env["DAM_SESSION_ID"] = AUTHOR_ID
+        return subprocess.run(
+            command,
+            cwd=ROOT,
+            env=env,
+            shell=True,
+            text=True,
+            capture_output=True,
+        )
+
+    def _session(self) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["DAM_SESSION_ID"] = AUTHOR_ID
+        env["GITHUB_HEAD_REF"] = "cursor/verify-79"
+        return subprocess.run(
+            [
+                "python3",
+                str(SCRIPT),
+                "verify-session",
+                "--criteria",
+                CRITERIA,
+                "--base",
+                BASE_SHA,
+                "--head",
+                HEAD_SHA,
+                "--checks",
+                CHECKS,
+            ],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_verify_branch_hook_memo_is_not_the_session_input(self) -> None:
+        hook = self._hook()
+        self.assertEqual(hook.returncode, 0, hook.stderr)
+        self.assertIn(AUTHOR_MEMO, hook.stdout)
+        self.assertIn(AUTHOR_ID, hook.stdout)
+        session = self._session()
+        self.assertEqual(session.returncode, 0, session.stderr)
+        receipt = session.stdout
+        self.assertIn(CRITERIA, receipt)
+        self.assertIn(BASE_SHA, receipt)
+        self.assertIn(HEAD_SHA, receipt)
+        self.assertIn(CHECKS, receipt)
+        self.assertNotIn(AUTHOR_MEMO, receipt)
+        self.assertNotIn(AUTHOR_ID, receipt)
+        self.assertNotEqual(receipt, hook.stdout)
+
+    def test_author_session_is_absent_from_verifier_input_and_env(self) -> None:
+        session = self._session()
+        self.assertEqual(session.returncode, 0, session.stderr)
+        self.assertIn("---ENV---", session.stdout)
+        prompt, env = session.stdout.split("---ENV---", 1)
+        self.assertNotIn(AUTHOR_MEMO, prompt)
+        self.assertNotIn(AUTHOR_ID, prompt)
+        self.assertNotIn(".team/sessions", prompt)
+        self.assertNotIn("DAM_SESSION_ID", env)
+        self.assertNotIn(AUTHOR_ID, env)
+        self.assertNotIn(AUTHOR_MEMO, env)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,109 @@
+===== 작성 세션 시작 출력 =====
+명령: GITHUB_HEAD_REF=work-79 python3 scripts/team-session.py start-context
+- 42: 상태 진행, 담당 cursor, 막힘 없음
+- 46: 상태 진행, 담당 cursor, 막힘 없음
+- 60: 상태 시작, 담당 cursor, 막힘 없음
+- 61: 상태 시작, 담당 cursor, 막힘 없음
+- 62: 상태 시작, 담당 cursor, 막힘 없음
+- 63: 상태 시작, 담당 cursor, 막힘 없음
+- 64: 상태 시작, 담당 cursor, 막힘 없음
+- 66: 상태 시작, 담당 cursor, 막힘 없음
+- 67: 상태 시작, 담당 cursor, 막힘 없음
+- 68: 상태 시작, 담당 cursor, 막힘 없음
+- 69: 상태 시작, 담당 cursor, 막힘 없음
+- 70: 상태 시작, 담당 cursor, 막힘 없음
+- 72: 상태 시작, 담당 cursor, 막힘 없음
+- 73: 상태 시작, 담당 cursor, 막힘 없음
+- 74: 상태 시작, 담당 cursor, 막힘 없음
+- 75: 상태 시작, 담당 cursor, 막힘 없음
+- 76: 상태 시작, 담당 cursor, 막힘 없음
+- 77: 상태 시작, 담당 cursor, 막힘 없음
+- 78: 상태 시작, 담당 cursor, 막힘 없음
+- 2026-11-26-ci-dispatch: 상태 진행, 담당 cursor, 막힘 없음
+- 79: 상태 시작, 담당 cursor, 막힘 없음
+모드: 기능
+
+# 상태 79
+
+## 지금 상태
+
+검증 역할 시작 출력은 완료 기준, BASE, HEAD, 검사 명령만 낸다. 작성자 결정 메모는 그 출력에 없다. 역할 없는 시작과 훅에는 남는다.
+
+## 결정
+
+- 입력 제한은 `start-context --role 검증` 인자다. 환경 변수와 훅 파일 변경은 쓰지 않는다.
+- 출력은 완료 기준, BASE, HEAD, 검사 명령뿐이다. state.md를 열지 않는다.
+- 만든 세션과 다른 세션은 출력 내용 차이로 본다. 세션 식별자는 만들지 않는다.
+- 작성자 결정 메모: 이 문장은 검증 세션 시작 출력에 넣지 않는다.
+- 보안 항목 경로는 ADR 0010의 제안만이다. 감지 코드는 없다.
+- 로그 종류 칸은 기존 형식의 go다. 승인 문장은 내용에 적는다.
+
+## 다음 할 일
+
+PR을 연 뒤 #80은 시작하지 않는다.
+
+===== 검증 세션 시작 출력 =====
+명령: python3 scripts/team-session.py start-context --role 검증 --criteria <완료 기준> --base fbdbc3aa2dbbcaa27597b468e0ff5d70e6db7506 --head cec45b816bb940c43f74a354fec5310919f8f33e --checks <검사 명령>
+완료 기준
+검증 세션이 만든 세션과 다른 세션이고 시작 때 받는 입력이 완료 기준, BASE와 HEAD 커밋 SHA, 검사 명령으로 제한되며, 작성자의 결정 메모가 검증 세션의 시작 출력에 들어가지 않는 것을 테스트가 확인한다 (https://github.com/rimoir/dam/issues/58)
+BASE
+fbdbc3aa2dbbcaa27597b468e0ff5d70e6db7506
+HEAD
+cec45b816bb940c43f74a354fec5310919f8f33e
+검사 명령
+python3 scripts/team-session_test.py
+python3 scripts/session_context_test.py
+python3 scripts/session_hook_test.py
+python3 scripts/orchestrator_test.py
+python3 scripts/team-session.py check
+
+===== 훅 명령 시작 출력 =====
+명령: python3 "$CLAUDE_PROJECT_DIR/scripts/team-session.py" start-context || true
+- 42: 상태 진행, 담당 cursor, 막힘 없음
+- 46: 상태 진행, 담당 cursor, 막힘 없음
+- 60: 상태 시작, 담당 cursor, 막힘 없음
+- 61: 상태 시작, 담당 cursor, 막힘 없음
+- 62: 상태 시작, 담당 cursor, 막힘 없음
+- 63: 상태 시작, 담당 cursor, 막힘 없음
+- 64: 상태 시작, 담당 cursor, 막힘 없음
+- 66: 상태 시작, 담당 cursor, 막힘 없음
+- 67: 상태 시작, 담당 cursor, 막힘 없음
+- 68: 상태 시작, 담당 cursor, 막힘 없음
+- 69: 상태 시작, 담당 cursor, 막힘 없음
+- 70: 상태 시작, 담당 cursor, 막힘 없음
+- 72: 상태 시작, 담당 cursor, 막힘 없음
+- 73: 상태 시작, 담당 cursor, 막힘 없음
+- 74: 상태 시작, 담당 cursor, 막힘 없음
+- 75: 상태 시작, 담당 cursor, 막힘 없음
+- 76: 상태 시작, 담당 cursor, 막힘 없음
+- 77: 상태 시작, 담당 cursor, 막힘 없음
+- 78: 상태 시작, 담당 cursor, 막힘 없음
+- 2026-11-26-ci-dispatch: 상태 진행, 담당 cursor, 막힘 없음
+- 79: 상태 시작, 담당 cursor, 막힘 없음
+모드: 기능
+
+# 상태 79
+
+## 지금 상태
+
+검증 역할 시작 출력은 완료 기준, BASE, HEAD, 검사 명령만 낸다. 작성자 결정 메모는 그 출력에 없다. 역할 없는 시작과 훅에는 남는다.
+
+## 결정
+
+- 입력 제한은 `start-context --role 검증` 인자다. 환경 변수와 훅 파일 변경은 쓰지 않는다.
+- 출력은 완료 기준, BASE, HEAD, 검사 명령뿐이다. state.md를 열지 않는다.
+- 만든 세션과 다른 세션은 출력 내용 차이로 본다. 세션 식별자는 만들지 않는다.
+- 작성자 결정 메모: 이 문장은 검증 세션 시작 출력에 넣지 않는다.
+- 보안 항목 경로는 ADR 0010의 제안만이다. 감지 코드는 없다.
+- 로그 종류 칸은 기존 형식의 go다. 승인 문장은 내용에 적는다.
+
+## 다음 할 일
+
+PR을 연 뒤 #80은 시작하지 않는다.
+
+===== 워커 프롬프트 =====
+단위: 문서
+의존: 없음
+파일: docs/spec.md
+결과 칸은 .team/sessions/79/result.md의 ## 결과 절에만 쓴다. 수정한 내용만 그 절에 적는다. 그 절의 첫 줄은 PASS, ISSUES, BLOCKED 중 하나로 시작한다. 결정 줄과 승인 줄은 바꾸지 않는다.
+

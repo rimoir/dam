@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""세션 시작 출력. 현황판의 열린 줄과 작업 하나의 state.md만 낸다."""
+"""세션 시작 출력. 작성 세션은 현황판과 state.md를, 검증 역할은 네 칸만 낸다."""
 
 from __future__ import annotations
 
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 INJECT_LIMIT = 4000
@@ -19,6 +20,7 @@ COMMAND_RELS = (
     Path(".agents/skills/mode/SKILL.md"),
 )
 SHORTEN_LINE = "상한을 넘었다. 상태 파일 또는 시작 주입을 줄여라.\n"
+_SHA = re.compile(r"^[0-9a-f]{40}$")
 WORK_ID = re.compile(
     r"^(?:[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9]+(?:-[a-z0-9]+)*)$"
 )
@@ -112,6 +114,77 @@ def render_start_context(root: Path, branch: str, switch: bool = False) -> str:
     if state_len > STATE_LIMIT or len(body) > INJECT_LIMIT:
         return SHORTEN_LINE
     return body
+
+
+@dataclass(frozen=True)
+class VerifyStart:
+    criteria: str
+    base: str
+    head: str
+    checks: str
+
+    def __post_init__(self) -> None:
+        if not self.criteria or self.criteria != self.criteria.strip():
+            raise ValueError("완료 기준이 없다")
+        if not self.checks or self.checks != self.checks.strip():
+            raise ValueError("검사 명령이 없다")
+        if _SHA.fullmatch(self.base) is None:
+            raise ValueError("BASE 커밋 SHA가 아니다")
+        if _SHA.fullmatch(self.head) is None:
+            raise ValueError("HEAD 커밋 SHA가 아니다")
+
+
+def render_verify_start(start: VerifyStart) -> str:
+    return (
+        f"완료 기준\n{start.criteria}\n"
+        f"BASE\n{start.base}\n"
+        f"HEAD\n{start.head}\n"
+        f"검사 명령\n{start.checks}\n"
+    )
+
+
+def _plain(value: str, missing: str) -> str:
+    text = value.strip()
+    if not text:
+        raise ValueError(missing)
+    return text
+
+
+def verify_start_or_none(
+    role: str | None,
+    criteria: str | None,
+    base: str | None,
+    head: str | None,
+    checks: str | None,
+    switch: bool,
+) -> VerifyStart | None:
+    supplied = any(item is not None for item in (criteria, base, head, checks))
+    if role is None and not supplied:
+        return None
+    if role is None:
+        raise ValueError("역할 없이 검증 입력을 넘겼다")
+    name = role.strip()
+    if name != "검증":
+        raise ValueError(f"검증 역할이 아니다: {name or role}")
+    if switch:
+        raise ValueError("검증 역할은 로그를 더하지 않는다")
+    if criteria is None:
+        raise ValueError("완료 기준이 없다")
+    if base is None:
+        raise ValueError("BASE 커밋 SHA가 없다")
+    if head is None:
+        raise ValueError("HEAD 커밋 SHA가 없다")
+    if checks is None:
+        raise ValueError("검사 명령이 없다")
+    start = VerifyStart(
+        criteria=_plain(criteria, "완료 기준이 없다"),
+        base=_plain(base, "BASE 커밋 SHA가 없다"),
+        head=_plain(head, "HEAD 커밋 SHA가 없다"),
+        checks=_plain(checks, "검사 명령이 없다"),
+    )
+    if len(render_verify_start(start)) > INJECT_LIMIT:
+        raise ValueError(f"검증 시작이 {INJECT_LIMIT}자를 넘는다")
+    return start
 
 
 def rotate_log(root: Path, work_id: str) -> Path | None:

@@ -24,11 +24,14 @@ from issue_tracker import (  # noqa: E402
     load_tracker,
     redact,
 )
+from verify_session import open_verify_session  # noqa: E402
 from session_context import (  # noqa: E402
     current_branch,
     limit_errors,
     render_start_context,
+    render_verify_start,
     rotate_log,
+    verify_start_or_none,
     code_dirty_paths,
     begin_resume,
     end_resume,
@@ -283,6 +286,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="도구를 바꿀 때 로그 마지막 5줄을 더한다.",
     )
+    start.add_argument("--role", default=None)
+    start.add_argument("--criteria", default=None)
+    start.add_argument("--base", default=None)
+    start.add_argument("--head", default=None)
+    start.add_argument("--checks", default=None)
+    verify_session = sub.add_parser("verify-session", help="훅 없는 복사본에서 검증 세션을 띄운다.")
+    verify_session.add_argument("--criteria", required=True)
+    verify_session.add_argument("--base", required=True)
+    verify_session.add_argument("--head", required=True)
+    verify_session.add_argument("--checks", required=True)
     pull = sub.add_parser("pull", help="사람이 명령했을 때만 PR을 연다.")
     pull.add_argument("work_id")
     pull.add_argument("--title", required=True)
@@ -306,7 +319,40 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "summary":
             sys.stdout.write(summary_text(root, args.work_id))
         elif args.command == "start-context":
-            sys.stdout.write(render_start_context(root, current_branch(root), args.switch))
+            try:
+                selected = verify_start_or_none(
+                    args.role,
+                    args.criteria,
+                    args.base,
+                    args.head,
+                    args.checks,
+                    args.switch,
+                )
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from exc
+            if selected is None:
+                sys.stdout.write(render_start_context(root, current_branch(root), args.switch))
+            else:
+                sys.stdout.write(render_verify_start(selected))
+        elif args.command == "verify-session":
+            try:
+                selected = verify_start_or_none(
+                    "검증",
+                    args.criteria,
+                    args.base,
+                    args.head,
+                    args.checks,
+                    False,
+                )
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from exc
+            if selected is None:
+                raise SystemExit("검증 입력이 없다")
+            code, out, err = open_verify_session(root, render_verify_start(selected))
+            sys.stdout.write(out)
+            if err:
+                sys.stderr.write(err if err.endswith("\n") else err + "\n")
+            return code
         elif args.command == "pull":
             sys.stdout.write(open_work_pr(root, args.work_id, args.title, args.tool) + "\n")
         elif args.command == "board":
