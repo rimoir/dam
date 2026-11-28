@@ -1,0 +1,4 @@
+cursor/verify-79에서 훅 명령은 작성자 결정 메모와 세션 id를 낸다.
+verify-session 명령은 없다.
+오류: invalid choice: 'verify-session'
+두 검사 모두 종료 2.
