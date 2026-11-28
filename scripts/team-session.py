@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import os
 import re
 import subprocess
 import sys
@@ -39,7 +40,12 @@ from verify_report import (  # noqa: E402
     take_snapshot,
     verdict_word,
 )
-from verify_comment import judge_verify_comment  # noqa: E402
+from verify_comment import judge_verify_comment, valid_session_id  # noqa: E402
+from worker_merge import (  # noqa: E402
+    author_session_from_body,
+    merge_refusal,
+    parse_created,
+)
 from verify_session import open_verify_session  # noqa: E402
 from session_context import (  # noqa: E402
     current_branch,
@@ -252,6 +258,45 @@ def refresh_board(root: Path, tracker=None) -> None:
         handle.truncate()
 
 
+def run_worker_merge(root: Path, number: int) -> str:
+    tracker = load_tracker(root)
+    view = tracker.read_pull_request(number)
+    head = view.get("headRefOid")
+    created = view.get("createdAt")
+    mergeable = view.get("mergeable")
+    body = view.get("body") or ""
+    raw_comments = view.get("comments") or []
+    if not isinstance(head, str) or not isinstance(created, str) or not isinstance(mergeable, str):
+        raise SystemExit("PR을 읽지 못했다")
+    if not isinstance(body, str) or not isinstance(raw_comments, list):
+        raise SystemExit("PR을 읽지 못했다")
+    comments: list[str] = []
+    for item in raw_comments:
+        if isinstance(item, dict) and isinstance(item.get("body"), str):
+            comments.append(item["body"])
+        elif isinstance(item, str):
+            comments.append(item)
+        else:
+            raise SystemExit("PR을 읽지 못했다")
+    try:
+        opened = parse_created(created)
+    except ValueError as exc:
+        raise SystemExit("PR을 읽지 못했다") from exc
+    reason = merge_refusal(
+        author_session=author_session_from_body(body),
+        checks=tracker.read_pull_checks(number),
+        comments=comments,
+        head=head.strip(),
+        created_at=opened,
+        now=datetime.now(timezone.utc),
+        mergeable=mergeable,
+    )
+    if reason:
+        raise SystemExit(reason)
+    tracker.merge_squash(number, head.strip(), commanded=True)
+    return f"머지 {head.strip()}\n"
+
+
 def run_worker_push(
     root: Path,
     work_id: str,
@@ -279,6 +324,9 @@ def run_worker_push(
     )
     if reason:
         raise SystemExit(reason)
+    session = os.environ.get("DAM_SESSION_ID", "").strip()
+    if not valid_session_id(session):
+        raise SystemExit("세션 id가 없거나 형식이 아니다")
     done = subprocess.run(
         ["git", "-C", str(root), "push", "origin", worker_push_refspec(branch)],
         check=False,
@@ -288,10 +336,17 @@ def run_worker_push(
     if done.returncode != 0:
         detail = (done.stderr or done.stdout or "git push가 실패했다").strip()
         raise SystemExit(detail or "git push가 실패했다")
-    return open_work_pr(root, work_id, title, tool)
+    return open_work_pr(root, work_id, title, tool, author_session=session)
 
 
-def open_work_pr(root: Path, work_id: str, title: str, tool: str, tracker=None) -> str:
+def open_work_pr(
+    root: Path,
+    work_id: str,
+    title: str,
+    tool: str,
+    tracker=None,
+    author_session: str | None = None,
+) -> str:
     if tool not in ("Claude Code", "Codex"):
         raise SystemExit("도구는 Claude Code 또는 Codex다")
     if not ISSUE_ID.fullmatch(work_id):
@@ -303,6 +358,10 @@ def open_work_pr(root: Path, work_id: str, title: str, tool: str, tracker=None) 
         raise SystemExit(f"log.md가 없다: {work_id}")
     active = tracker if tracker is not None else load_tracker(root)
     body = f"{active.issue_link(int(work_id))}\n"
+    if author_session is not None:
+        if not valid_session_id(author_session):
+            raise SystemExit("세션 id가 없거나 형식이 아니다")
+        body += f"세션 id: {author_session}\n"
     url = active.open_pull_request(title.strip(), body, commanded=True)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     text = log_path.read_text(encoding="utf-8")
@@ -403,6 +462,8 @@ def main(argv: list[str] | None = None) -> int:
     verify_session.add_argument("--base", required=True)
     verify_session.add_argument("--head", required=True)
     verify_session.add_argument("--checks", required=True)
+    merge = sub.add_parser("worker-merge", help="조건을 모두 확인한 뒤에만 squash 머지한다.")
+    merge.add_argument("number")
     ship = sub.add_parser("worker-push", help="승인된 작업 브랜치로만 push하고 PR을 연다.")
     ship.add_argument("work_id")
     ship.add_argument("--title", required=True)
@@ -485,6 +546,10 @@ def main(argv: list[str] | None = None) -> int:
             if err:
                 sys.stderr.write(err if err.endswith("\n") else err + "\n")
             return code
+        elif args.command == "worker-merge":
+            if not ISSUE_ID.fullmatch(args.number):
+                raise SystemExit("PR 번호가 아니다")
+            sys.stdout.write(run_worker_merge(root, int(args.number)))
         elif args.command == "worker-push":
             url = run_worker_push(
                 root,

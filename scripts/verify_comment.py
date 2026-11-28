@@ -35,6 +35,19 @@ def _fields(text: str) -> dict[str, str] | None:
     return found
 
 
+def valid_session_id(value: str) -> bool:
+    return _SESSION.fullmatch(value) is not None
+
+
+def verify_comment_session(text: str, expected_head: str) -> str | None:
+    if judge_verify_comment(text, expected_head) != "검토 기록":
+        return None
+    fields = _fields(text)
+    if fields is None:
+        return None
+    return fields["세션 id"]
+
+
 def judge_verify_comment(text: str, expected_head: str) -> str:
     fields = _fields(text)
     if fields is None:

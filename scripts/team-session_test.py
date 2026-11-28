@@ -752,7 +752,18 @@ class WorkerPushTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def _run(self, *args: str, gh_fail: str | None = None, branch: str = "worker/84"):
-        return worker_push(self.root, "84", "--tool", "Codex", "--title", "제목", *args, gh_fail=gh_fail, branch=branch)
+        return worker_push(
+            self.root,
+            "84",
+            "--tool",
+            "Codex",
+            "--title",
+            "제목",
+            *args,
+            gh_fail=gh_fail,
+            branch=branch,
+            session="worker-session-84",
+        )
 
     def test_without_approval_does_not_push(self) -> None:
         self.log.write_text("# 로그 84\n\n2026-11-26T00:00:00Z Codex 시작 노트\n", encoding="utf-8")
@@ -855,7 +866,10 @@ class WorkerPushTest(unittest.TestCase):
         self.assertNotIn("+", git_log)
         self.assertNotIn("--force", git_log)
         body = (self.root / "gh-stdin.txt").read_text(encoding="utf-8")
-        self.assertIn("https://github.com/rimoir/dam/issues/84", body)
+        self.assertEqual(
+            body,
+            "https://github.com/rimoir/dam/issues/84\n세션 id: worker-session-84\n",
+        )
         log_lines = [
             line
             for line in self.log.read_text(encoding="utf-8").splitlines()
@@ -1059,7 +1073,7 @@ class WorkerMergeTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("검사가 실패했다", result.stderr)
-        self.assertNotIn("merge", self._gh())
+        self.assertNotIn("pr merge", self._gh())
 
     def test_pending_check_does_not_merge(self) -> None:
         result = self._run(
@@ -1068,7 +1082,7 @@ class WorkerMergeTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("검사가 진행 중이다", result.stderr)
-        self.assertNotIn("merge", self._gh())
+        self.assertNotIn("pr merge", self._gh())
 
     def test_missing_check_does_not_merge(self) -> None:
         result = self._run(
@@ -1078,31 +1092,31 @@ class WorkerMergeTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("검사가 하나 빠졌다", result.stderr)
         self.assertIn("gitleaks", result.stderr)
-        self.assertNotIn("merge", self._gh())
+        self.assertNotIn("pr merge", self._gh())
 
     def test_missing_review_does_not_merge(self) -> None:
         result = self._run(comments=[])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("검증 기록이 없다", result.stderr)
-        self.assertNotIn("merge", self._gh())
+        self.assertNotIn("pr merge", self._gh())
 
     def test_other_head_does_not_merge(self) -> None:
         result = self._run(comments=[review_comment(VERIFIER_SESSION, OTHER_HEAD)])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("검증한 헤드가 PR 헤드와 다르다", result.stderr)
-        self.assertNotIn("merge", self._gh())
+        self.assertNotIn("pr merge", self._gh())
 
     def test_comment_without_session_does_not_merge(self) -> None:
         result = self._run(comments=[review_comment(None, MERGE_HEAD)])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("세션 id가 없다", result.stderr)
-        self.assertNotIn("merge", self._gh())
+        self.assertNotIn("pr merge", self._gh())
 
     def test_same_session_does_not_merge(self) -> None:
         result = self._run(comments=[review_comment(AUTHOR_SESSION, MERGE_HEAD)])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("만든 세션과 같다", result.stderr)
-        self.assertNotIn("merge", self._gh())
+        self.assertNotIn("pr merge", self._gh())
 
     def test_missing_author_session_does_not_merge(self) -> None:
         result = self._run(
@@ -1111,7 +1125,7 @@ class WorkerMergeTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("만든 세션 id가 없다", result.stderr)
-        self.assertNotIn("merge", self._gh())
+        self.assertNotIn("pr merge", self._gh())
 
     def test_young_pr_does_not_merge(self) -> None:
         result = self._run(
@@ -1120,7 +1134,7 @@ class WorkerMergeTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("1분이 지나지 않았다", result.stderr)
-        self.assertNotIn("merge", self._gh())
+        self.assertNotIn("pr merge", self._gh())
 
     def test_conflict_does_not_merge(self) -> None:
         result = self._run(
@@ -1129,13 +1143,13 @@ class WorkerMergeTest(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("충돌", result.stderr)
-        self.assertNotIn("merge", self._gh())
+        self.assertNotIn("pr merge", self._gh())
 
     def test_non_record_comment_does_not_merge(self) -> None:
         result = self._run(comments=[review_comment(VERIFIER_SESSION, MERGE_HEAD, evidence=None)])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("검토 기록이 아니다", result.stderr)
-        self.assertNotIn("merge", self._gh())
+        self.assertNotIn("pr merge", self._gh())
 
     def test_ready_pr_merges_squash_with_head_sha(self) -> None:
         result = self._run(comments=[review_comment(VERIFIER_SESSION, MERGE_HEAD)])
