@@ -542,6 +542,7 @@ class IssueStartTest(unittest.TestCase):
             lambda: tracker.add_label(30, "bug", commanded=False),
             lambda: tracker.close_issue(30, commanded=False),
             lambda: tracker.open_pull_request("제목", "본문", commanded=False),
+            lambda: tracker.comment_on_pull(30, "본문", head="a" * 40, commanded=False),
         ):
             with self.assertRaises(tracker_mod.IssueTrackerError):
                 call()
@@ -564,6 +565,35 @@ class IssueStartTest(unittest.TestCase):
         self.assertEqual(stdin, "본문")
         self.assertNotIn("dooray", " ".join(args))
         self.assertTrue(all(item != "curl" for item in args))
+
+    def test_pull_comment_is_only_a_review_record(self) -> None:
+        tracker_mod = load_module(TRACKER, "issue_tracker_pull_comment")
+        seen: list[tuple[list[str], str | None]] = []
+
+        def runner(args: list[str], stdin: str | None = None):
+            seen.append((args, stdin))
+            return tracker_mod.GhResult(0, "", "")
+
+        head = "c" * 40
+        body = (
+            "세션 id: verify-session-82\n"
+            f"헤드 SHA: {head}\n"
+            "확인 방법: python3 scripts/session_context_test.py\n"
+            "증거 요약: 218건 통과\n"
+        )
+        tracker = tracker_mod.GithubIssueTracker("rimoir/dam", runner)
+        with self.assertRaises(tracker_mod.IssueTrackerError):
+            tracker.comment_on_pull(30, "세션 id가 없다\n", head=head, commanded=True)
+        self.assertEqual(seen, [])
+        tracker.comment_on_pull(30, body, head=head, commanded=True)
+        self.assertEqual(len(seen), 1)
+        args, stdin = seen[0]
+        self.assertEqual(args[:3], ["gh", "pr", "comment"])
+        self.assertEqual(stdin, body)
+        seen.clear()
+        with self.assertRaises(tracker_mod.IssueTrackerError):
+            tracker.comment_on_pull(30, body, head="d" * 40, commanded=True)
+        self.assertEqual(seen, [])
 
     def test_slug_drops_credentials(self) -> None:
         tracker_mod = load_module(TRACKER, "issue_tracker_slug")

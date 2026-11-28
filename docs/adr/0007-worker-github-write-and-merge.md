@@ -29,7 +29,9 @@
 출처: https://github.com/rimoir/dam/issues/4#issuecomment-7182074410
 원문 중계: https://github.com/rimoir/dam/issues/60#issuecomment-7183757371
 
-만든 세션과 다른 세션의 검증 코멘트를 검토 기록으로 치려면 헤드 SHA, 확인 방법, 증거가 있어야 한다. 사람이 머지하는 경로의 검토 기록 정의는 ADR 0003에 그대로 둔다.
+만든 세션과 다른 세션의 검증 코멘트를 검토 기록으로 치려면 헤드 SHA, 확인 방법, 증거가 있어야 한다. 거기에 검증 세션 id가 없으면 검토 기록이 아니다. 세션 id가 없거나 헤드가 지금 PR 헤드와 다르면 그 코멘트는 기록이 아니다. 첫 줄 표식만으로는 기록이 되지 않는다. #56에서 만든 세션의 자기 검증 코멘트가 기록으로 통과한 일이 있다 (https://github.com/rimoir/dam/issues/56#issuecomment-7186535471). 판정은 `docs/adr/0013-verification-comment.md`다. 사람이 머지하는 경로의 검토 기록 정의는 ADR 0003에 그대로 둔다.
+
+다른 도구 검증이 필요한 보안 항목 경로는 `docs/adr/0010-verification-session-input.md`의 제안 표다. 그 표로 막거나 검사하지 않는다. 브랜치 보호는 저장소 파일이 아니다.
 
 같은 GitHub 계정이 PR을 쓰고, 검증 코멘트를 남기고, 머지할 수 있다. 사람이 한 일과 구분하기 어렵다.
 

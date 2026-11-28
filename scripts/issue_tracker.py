@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
+from verify_comment import judge_verify_comment
+
 
 class IssueTrackerError(Exception):
     """이슈를 읽거나 쓰지 못한 이유. 노트에 쓰기 전에 올린다."""
@@ -221,6 +223,15 @@ class GithubIssueTracker:
             title=title_line,
             url=url_line,
             acceptance=criteria,
+        )
+
+    def comment_on_pull(self, number: int, body: str, *, head: str, commanded: bool) -> None:
+        if judge_verify_comment(body, head) != "검토 기록":
+            raise IssueTrackerError("검토 기록이 아니다")
+        self._write(
+            ["gh", "pr", "comment", str(number), "--repo", self.slug, "--body-file", "-"],
+            commanded,
+            stdin=body,
         )
 
     def comment(self, number: int, body: str, *, commanded: bool) -> None:

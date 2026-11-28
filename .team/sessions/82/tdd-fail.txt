@@ -1,0 +1,40 @@
+FFF
+======================================================================
+FAIL: test_complete_comment_matching_head_is_a_review_record (__main__.VerifyCommentTest.test_complete_comment_matching_head_is_a_review_record)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1779, in test_complete_comment_matching_head_is_a_review_record
+    self.assertEqual(done.returncode, 0, done.stderr)
+AssertionError: 2 != 0 : usage: team-session.py [-h]
+                       {new,summary,start-context,verify-session,pull,board,rotate,check,mode,code-clean,verify-record,verify-judge,verify-readonly,plan-check,resume}
+                       ...
+team-session.py: error: argument command: invalid choice: 'verify-comment' (choose from 'new', 'summary', 'start-context', 'verify-session', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-record', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')
+
+
+======================================================================
+FAIL: test_different_head_is_invalid (__main__.VerifyCommentTest.test_different_head_is_invalid)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1798, in test_different_head_is_invalid
+    self.assertEqual(done.stdout, "무효\n")
+AssertionError: '' != '무효\n'
++ 무효
+
+
+======================================================================
+FAIL: test_missing_session_or_head_is_not_a_review_record (__main__.VerifyCommentTest.test_missing_session_or_head_is_not_a_review_record)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1793, in test_missing_session_or_head_is_not_a_review_record
+    self.assertEqual(done.stdout, "아님\n", text)
+AssertionError: '' != '아님\n'
++ 아님
+ : 헤드 SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+확인 방법: python3 scripts/session_context_test.py
+증거 요약: 218건 통과
+
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.181s
+
+FAILED (failures=3)
