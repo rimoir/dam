@@ -1,0 +1,41 @@
+FFFF
+======================================================================
+FAIL: test_caller_refspec_is_not_passed_to_git (__main__.WorkerPushTest.test_caller_refspec_is_not_passed_to_git) (target='+cursor/84')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 815, in test_caller_refspec_is_not_passed_to_git
+    self.assertNotEqual(result.returncode, 0, result.stdout)
+AssertionError: 0 == 0 : https://github.com/rimoir/dam/pull/99
+
+
+======================================================================
+FAIL: test_caller_refspec_is_not_passed_to_git (__main__.WorkerPushTest.test_caller_refspec_is_not_passed_to_git) (target='+refs/heads/cursor/84')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 815, in test_caller_refspec_is_not_passed_to_git
+    self.assertNotEqual(result.returncode, 0, result.stdout)
+AssertionError: 0 == 0 : https://github.com/rimoir/dam/pull/99
+
+
+======================================================================
+FAIL: test_caller_refspec_is_not_passed_to_git (__main__.WorkerPushTest.test_caller_refspec_is_not_passed_to_git) (target='other/84')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 815, in test_caller_refspec_is_not_passed_to_git
+    self.assertNotEqual(result.returncode, 0, result.stdout)
+AssertionError: 0 == 0 : https://github.com/rimoir/dam/pull/99
+
+
+======================================================================
+FAIL: test_caller_refspec_is_not_passed_to_git (__main__.WorkerPushTest.test_caller_refspec_is_not_passed_to_git) (target=':cursor/84')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/team-session_test.py", line 815, in test_caller_refspec_is_not_passed_to_git
+    self.assertNotEqual(result.returncode, 0, result.stdout)
+AssertionError: 0 == 0 : https://github.com/rimoir/dam/pull/99
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.741s
+
+FAILED (failures=4)

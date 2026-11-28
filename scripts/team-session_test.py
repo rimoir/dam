@@ -776,6 +776,55 @@ class WorkerPushTest(unittest.TestCase):
         self.assertFalse((self.root / "git.log").exists())
         self.assertEqual(self.log.read_bytes(), before)
 
+    def _git_text(self) -> str:
+        path = self.root / "git.log"
+        return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+    def _assert_git_has_only_current_branch(self, text: str, branch: str) -> None:
+        for token in text.split():
+            self.assertNotIn("+", token)
+            self.assertNotIn("--force", token)
+            self.assertNotEqual(token, "-f")
+            self.assertNotIn("--force-with-lease", token)
+            self.assertNotIn("--mirror", token)
+            self.assertNotIn("--delete", token)
+        if "push" not in text:
+            return
+        spec = f"refs/heads/{branch}:refs/heads/{branch}"
+        self.assertIn(spec, text)
+        for token in text.split():
+            if ":" in token or token.startswith("+") or token.startswith("refs/"):
+                self.assertEqual(token, spec)
+
+    def test_caller_refspec_is_not_passed_to_git(self) -> None:
+        branch = "cursor/84"
+        targets = (
+            "+cursor/84",
+            "+refs/heads/cursor/84",
+            "other/84",
+            "refs/heads/main",
+            "HEAD:main",
+            "cursor/84:main",
+            ":cursor/84",
+        )
+        for target in targets:
+            with self.subTest(target=target):
+                if (self.root / "git.log").exists():
+                    (self.root / "git.log").unlink()
+                result = self._run("--target", target, branch=branch)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                text = self._git_text()
+                self.assertNotIn(target, text)
+                self._assert_git_has_only_current_branch(text, branch)
+                self.assertNotIn("push", text)
+        for extra in (["--force-with-lease"], ["-f"], ["--mirror"], ["--delete"]):
+            with self.subTest(extra=extra):
+                if (self.root / "git.log").exists():
+                    (self.root / "git.log").unlink()
+                result = self._run(*extra, branch=branch)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("push", self._git_text())
+
     def test_failed_pr_open_leaves_log_bytes(self) -> None:
         before = self.log.read_bytes()
         result = self._run(gh_fail="pr create failed")
