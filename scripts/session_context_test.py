@@ -1175,6 +1175,10 @@ AUTHOR_ID = "author-session-79"
 
 class VerifySessionLaunchTest(unittest.TestCase):
     def setUp(self) -> None:
+        from verify_session import isolation_available
+
+        if not isolation_available():
+            self.skipTest("unshare가 없다")
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         subprocess.run(["git", "init"], cwd=self.root, check=True, capture_output=True)
@@ -1200,7 +1204,9 @@ class VerifySessionLaunchTest(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
-        self.tmp.cleanup()
+        tmp = getattr(self, "tmp", None)
+        if tmp is not None:
+            tmp.cleanup()
 
     def _hook(self) -> subprocess.CompletedProcess[str]:
         settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))

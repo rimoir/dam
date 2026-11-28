@@ -20,7 +20,7 @@
 
 `python3 scripts/team-session.py start-context`는 `.team/board.md`의 열린 줄과, 브랜치 이름이 이슈 번호로 끝날 때 그 작업 하나의 `state.md`만 낸다. 그 상태 파일 첫 줄이 `모드:`로 시작하면 그 줄도 출력에 남는다. 첫 줄이 없어도 오류는 아니다. 번호가 없거나 그 번호가 열린 줄이 아니면 작업 줄은 `작업: 없음 (열린 줄 N)`이다. 상태 `완료`와 `닫힘`은 열린 줄이 아니다. 도구를 바꿀 때는 `start-context --switch`로 그 로그의 마지막 5줄만 더하고, 로그 전체는 넣지 않는다. 시작 주입 4,000자 또는 상태 파일 2,000자를 넘으면 본문 대신 줄이라는 한 줄만 낸다. 이 값은 측정 전 임시 상한이다. `summary`는 state.md만 내는 호환 명령으로 남는다.
 
-검증 역할의 시작은 `python3 scripts/team-session.py start-context --role 검증 --criteria <완료 기준> --base <SHA> --head <SHA> --checks <검사 명령>`이다. 이 출력은 완료 기준, BASE, HEAD, 검사 명령만 낸다. 현황판, state.md, log.md, task.md, result.md는 읽지 않는다. 작성 세션의 결정 메모는 이 출력에 들어가지 않는다. 역할 인자가 없으면 위 작성 세션 출력과 같다. 환경 변수로 역할을 넘기지 않는다. 훅 파일은 그대로다. 결정은 `docs/adr/0010-verification-session-input.md`다.
+검증 역할의 시작은 `python3 scripts/team-session.py start-context --role 검증 --criteria <완료 기준> --base <SHA> --head <SHA> --checks <검사 명령>`이다. 이 출력은 완료 기준, BASE, HEAD, 검사 명령만 낸다. 현황판, state.md, log.md, task.md, result.md는 읽지 않는다. 작성 세션의 결정 메모는 이 출력에 들어가지 않는다. 역할 인자가 없으면 위 작성 세션 출력과 같다. 환경 변수로 역할을 넘기지 않는다. 훅 파일은 그대로다. 검증 세션은 `python3 scripts/team-session.py verify-session --criteria <완료 기준> --base <SHA> --head <SHA> --checks <검사 명령>`으로 훅이 없는 일회용 복사본 안에서 띄운다. 그 프로세스가 받은 첫 입력은 네 칸뿐이다. macOS에는 `unshare`가 없어 그 세션은 실패로 끝난다. 결정은 `docs/adr/0010-verification-session-input.md`다.
 
 `python3 scripts/team-session.py rotate <작업ID>`는 log.md가 200줄을 넘으면 앞부분을 `.team/sessions/<작업ID>/log/001.md`로 옮기고, log.md에는 최근 줄과 `이전: log/001.md`만 남긴다. 옮긴 내용은 바꾸지 않는다. 다시 넘으면 `002.md`다. `python3 scripts/team-session.py check`는 상태 파일 2,000자, 시작 주입 4,000자, 로그 200줄, 규칙 원본 50줄, 모드 명령 본문 40줄을 넘기면 실패한다. 두 모드 명령 본문이 달라도 실패한다. `notes.md`만 있는 폴더는 보지 않는다. 로그 200줄도 측정 전 임시 상한이다.
 
