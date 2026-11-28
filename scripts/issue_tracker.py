@@ -225,6 +225,71 @@ class GithubIssueTracker:
             acceptance=criteria,
         )
 
+    def read_pull_request(self, number: int) -> dict:
+        result = self.runner(
+            [
+                "gh",
+                "pr",
+                "view",
+                str(number),
+                "--repo",
+                self.slug,
+                "--json",
+                "headRefOid,createdAt,mergeable,body,comments",
+            ]
+        )
+        if result.code != 0:
+            reason = redact(result.stderr).strip() or "gh가 실패했다"
+            raise IssueTrackerError(f"PR을 읽지 못했다: {reason}")
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            raise IssueTrackerError("PR을 읽지 못했다: JSON이 아니다") from None
+        if not isinstance(data, dict):
+            raise IssueTrackerError("PR을 읽지 못했다: JSON이 아니다")
+        return data
+
+    def read_pull_checks(self, number: int) -> list:
+        result = self.runner(
+            [
+                "gh",
+                "pr",
+                "checks",
+                str(number),
+                "--repo",
+                self.slug,
+                "--json",
+                "name,state,bucket",
+            ]
+        )
+        stdout = (result.stdout or "").strip()
+        if result.code != 0 and not stdout:
+            reason = redact(result.stderr).strip() or "gh가 실패했다"
+            raise IssueTrackerError(f"검사를 읽지 못했다: {reason}")
+        try:
+            rows = json.loads(stdout) if stdout else []
+        except json.JSONDecodeError:
+            raise IssueTrackerError("검사를 읽지 못했다: JSON이 아니다") from None
+        if not isinstance(rows, list):
+            raise IssueTrackerError("검사를 읽지 못했다: 목록이 아니다")
+        return rows
+
+    def merge_squash(self, number: int, sha: str, *, commanded: bool) -> None:
+        self._write(
+            [
+                "gh",
+                "pr",
+                "merge",
+                str(number),
+                "--repo",
+                self.slug,
+                "--squash",
+                "--match-head-commit",
+                sha,
+            ],
+            commanded,
+        )
+
     def comment_on_pull(self, number: int, body: str, *, head: str, commanded: bool) -> None:
         if judge_verify_comment(body, head) != "검토 기록":
             raise IssueTrackerError("검토 기록이 아니다")
