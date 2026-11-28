@@ -4,7 +4,7 @@
 
 ## 지금 상태
 
-verify-record가 PASS만 남긴다. password, secret, token 이름 뒤의 값은 가림 한 곳에서 지운다. 이름 없는 비밀번호는 범위 밖이다.
+verify-record가 PASS만 남긴다. GITHUB_TOKEN, DB_PASSWORD, api_token, client_secret과 이스케이프된 따옴표 값은 가림 한 곳에서 지운다. 값 없는 token 문장은 그대로다.
 
 ## 결정
 

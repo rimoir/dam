@@ -48,7 +48,10 @@ _TOKEN = re.compile(
 )
 _USERINFO = re.compile(r"https://[^/\s]+@")
 _NAMED_SECRET = re.compile(
-    r"(?i)\b(password|secret|token)\b(\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|\S+)"
+    r"(?i)(?<![\w])"
+    r"((?:[\w]+[-_])*(?:password|secret|token)(?:[-_][\w]+)*)"
+    r"(\s*[:=]\s*)"
+    r"(\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|\S+)"
 )
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 _ITEM = re.compile(r"^\s*[-*]\s+(?:\[[ xX]\]\s+)?(.+?)\s*$")
