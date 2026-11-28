@@ -1,0 +1,15 @@
+===== 검증 세션이 받은 첫 입력 =====
+완료 기준
+완료 기준 문장
+BASE
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+HEAD
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+검사 명령
+python3 scripts/session_context_test.py
+
+---ENV---
+HOME=/mnt/copy/empty-home
+TMPDIR=/tmp
+PATH=/usr/bin:/bin
+PWD=/mnt/copy

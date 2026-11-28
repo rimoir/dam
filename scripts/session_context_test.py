@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import subprocess
@@ -1429,6 +1430,115 @@ class VerifyReadonlyTest(unittest.TestCase):
         self.assertEqual(done.stdout, "실패\n")
         self.assertNotEqual(done.returncode, 0)
         self.assertFalse(inside.exists())
+
+
+AUTHOR_ID = "author-session-79"
+
+
+class VerifySessionLaunchTest(unittest.TestCase):
+    def setUp(self) -> None:
+        from verify_session import isolation_available
+
+        if not isolation_available():
+            self.skipTest("unshare가 없다")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        subprocess.run(["git", "init"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=self.root, check=True)
+        script = self.root / "scripts"
+        script.mkdir()
+        (script / "ok.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "scripts/ok.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "checkout", "-b", "cursor/verify-79"],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+        )
+        write_board(self.root, [board_line("79", "시작").replace("dev", AUTHOR_ID)])
+        write_note(
+            self.root,
+            "79",
+            f"모드: 기능\n## 결정\n{AUTHOR_MEMO}\n세션 id: {AUTHOR_ID}\n",
+            f"2026-11-27T00:00:00Z Codex go {AUTHOR_ID}\n",
+        )
+
+    def tearDown(self) -> None:
+        tmp = getattr(self, "tmp", None)
+        if tmp is not None:
+            tmp.cleanup()
+
+    def _hook(self) -> subprocess.CompletedProcess[str]:
+        settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        command = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["CLAUDE_PROJECT_DIR"] = str(ROOT)
+        env["GITHUB_HEAD_REF"] = "cursor/verify-79"
+        env["DAM_SESSION_ID"] = AUTHOR_ID
+        return subprocess.run(
+            command,
+            cwd=ROOT,
+            env=env,
+            shell=True,
+            text=True,
+            capture_output=True,
+        )
+
+    def _session(self) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        env["DAM_SESSION_ID"] = AUTHOR_ID
+        env["GITHUB_HEAD_REF"] = "cursor/verify-79"
+        return subprocess.run(
+            [
+                "python3",
+                str(SCRIPT),
+                "verify-session",
+                "--criteria",
+                CRITERIA,
+                "--base",
+                BASE_SHA,
+                "--head",
+                HEAD_SHA,
+                "--checks",
+                CHECKS,
+            ],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_verify_branch_hook_memo_is_not_the_session_input(self) -> None:
+        hook = self._hook()
+        self.assertEqual(hook.returncode, 0, hook.stderr)
+        self.assertIn(AUTHOR_MEMO, hook.stdout)
+        self.assertIn(AUTHOR_ID, hook.stdout)
+        session = self._session()
+        self.assertEqual(session.returncode, 0, session.stderr)
+        receipt = session.stdout
+        self.assertIn(CRITERIA, receipt)
+        self.assertIn(BASE_SHA, receipt)
+        self.assertIn(HEAD_SHA, receipt)
+        self.assertIn(CHECKS, receipt)
+        self.assertNotIn(AUTHOR_MEMO, receipt)
+        self.assertNotIn(AUTHOR_ID, receipt)
+        self.assertNotEqual(receipt, hook.stdout)
+
+    def test_author_session_is_absent_from_verifier_input_and_env(self) -> None:
+        session = self._session()
+        self.assertEqual(session.returncode, 0, session.stderr)
+        self.assertIn("---ENV---", session.stdout)
+        prompt, env = session.stdout.split("---ENV---", 1)
+        self.assertNotIn(AUTHOR_MEMO, prompt)
+        self.assertNotIn(AUTHOR_ID, prompt)
+        self.assertNotIn(".team/sessions", prompt)
+        self.assertNotIn("DAM_SESSION_ID", env)
+        self.assertNotIn(AUTHOR_ID, env)
+        self.assertNotIn(AUTHOR_MEMO, env)
 
 
 if __name__ == "__main__":
