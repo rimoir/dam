@@ -1541,5 +1541,206 @@ class VerifySessionLaunchTest(unittest.TestCase):
         self.assertNotIn(AUTHOR_MEMO, env)
 
 
+class VerifyRecordTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.folder = self.root / ".team" / "sessions" / "81"
+        self.folder.mkdir(parents=True)
+        self.result = self.folder / "result.md"
+        self.log = self.folder / "log.md"
+        self.result.write_text(
+            "# 결과 81\n\n## 결과\n\n(아직 없음)\n\n## 교훈 후보\n\n- 그대로\n",
+            encoding="utf-8",
+        )
+        self.log.write_text("# 로그 81\n\n2026-11-26T00:00:00Z Codex 시작 노트\n", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _record(
+        self,
+        text: str,
+        tool: str = "Codex",
+        model: str = "codex-test",
+        head: str = EXPECT_HEAD,
+        work: str = "81",
+    ) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["TEAM_ROOT"] = str(self.root)
+        return subprocess.run(
+            [
+                "python3",
+                str(SCRIPT),
+                "verify-record",
+                "--work",
+                work,
+                "--tool",
+                tool,
+                "--model",
+                model,
+                "--head",
+                head,
+                "--text",
+                text,
+            ],
+            cwd=self.root,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_passed_verdict_lands_in_result_and_log(self) -> None:
+        from orchestrator import judge, result_section_line
+        from session_context import log_has_go
+
+        done = self._record(verdict_text("PASS"), tool="Claude Code", model="claude-test")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "남김\n")
+        body = self.result.read_text(encoding="utf-8")
+        line = result_section_line(body)
+        self.assertEqual(line, "PASS 헤드 " + EXPECT_HEAD[:7] + " 모델 claude-test")
+        self.assertNotIn("64개 통과", line)
+        self.assertIn("64개 통과", body)
+        self.assertIn("- 그대로", body)
+        self.assertEqual(judge(0, line, True), "성공")
+        log = self.log.read_text(encoding="utf-8")
+        self.assertIn(
+            "Claude Code 종료 검증 PASS 모델 claude-test 헤드 " + EXPECT_HEAD[:7],
+            log,
+        )
+        self.assertFalse(log_has_go(log))
+        self.assertLessEqual(len(log.splitlines()), LOG_LINE_LIMIT)
+
+    def test_issues_blocked_and_malformed_leave_files_unchanged(self) -> None:
+        cases = (
+            (verdict_text("ISSUES", evidence="실패 1개"), "ISSUES\n"),
+            (verdict_text("BLOCKED", evidence="명령을 실행하지 못했다"), "BLOCKED\n"),
+            ("PASS\n헤드 SHA: " + EXPECT_HEAD + "\n확인 방법: 명령\n", "실패\n"),
+            (verdict_text("PASS", head=OTHER_HEAD), "실패\n"),
+        )
+        for text, expected in cases:
+            before_result = self.result.read_bytes()
+            before_log = self.log.read_bytes()
+            done = self._record(text)
+            self.assertEqual(done.stdout, expected, text)
+            self.assertNotEqual(done.returncode, 0, text)
+            self.assertEqual(self.result.read_bytes(), before_result, text)
+            self.assertEqual(self.log.read_bytes(), before_log, text)
+
+    def test_bad_tool_does_not_write(self) -> None:
+        before_result = self.result.read_bytes()
+        before_log = self.log.read_bytes()
+        done = self._record(verdict_text("PASS"), tool="Cursor")
+        self.assertEqual(done.stdout, "실패\n")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertEqual(self.result.read_bytes(), before_result)
+        self.assertEqual(self.log.read_bytes(), before_log)
+
+    def test_token_is_not_stored(self) -> None:
+        token = "ghp_" + ("a" * 36)
+        done = self._record(verdict_text("PASS", evidence="증거 " + token), model="codex-test")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        body = self.result.read_text(encoding="utf-8")
+        log = self.log.read_text(encoding="utf-8")
+        self.assertNotIn(token, body)
+        self.assertNotIn(token, log)
+        self.assertIn("***", body)
+
+    def test_named_secret_values_are_not_stored(self) -> None:
+        samples = (
+            ("password=hunter2", "hunter2"),
+            ("secret: abc", "abc"),
+            ("token=plainvalue", "plainvalue"),
+            ("Password=Hunter2", "Hunter2"),
+            ("SECRET: ABCVALUE", "ABCVALUE"),
+            ("Token=PlainValue", "PlainValue"),
+            ('password = "hunter2"', "hunter2"),
+            ("secret = 'abc'", "abc"),
+            ('token = "plainvalue"', "plainvalue"),
+            ("password:hunter2", "hunter2"),
+            ("secret : abc", "abc"),
+            ("token : plainvalue", "plainvalue"),
+            ('PASSWORD = "hunter two"', "hunter two"),
+        )
+        for evidence, secret in samples:
+            done = self._record(verdict_text("PASS", evidence="증거 " + evidence))
+            self.assertEqual(done.returncode, 0, done.stderr)
+            body = self.result.read_text(encoding="utf-8")
+            log = self.log.read_text(encoding="utf-8")
+            self.assertNotIn(secret, body, evidence)
+            self.assertNotIn(secret, log, evidence)
+            self.assertIn("***", body, evidence)
+
+    def test_compound_keys_and_escaped_quotes_are_not_stored(self) -> None:
+        samples = (
+            ("GITHUB_TOKEN=envtoken", "envtoken"),
+            ("DB_PASSWORD=envpass", "envpass"),
+            ("api_token=xyzvalue", "xyzvalue"),
+            ("client_secret=secvalue", "secvalue"),
+            ("db_password=dbvalue", "dbvalue"),
+            ("access-token=accvalue", "accvalue"),
+            ('password="a\\"b"', 'b"'),
+            ('password="a\\"zqtail"', "zqtail"),
+            ("secret='a\\'sqtail'", "sqtail"),
+        )
+        for evidence, secret in samples:
+            with self.subTest(evidence=evidence):
+                done = self._record(
+                    verdict_text("PASS", evidence="증거 " + evidence),
+                    model=evidence,
+                )
+                self.assertEqual(done.returncode, 0, done.stderr)
+                body = self.result.read_text(encoding="utf-8")
+                log = self.log.read_text(encoding="utf-8")
+                self.assertNotIn(secret, body, evidence)
+                self.assertNotIn(secret, log, evidence)
+                self.assertIn("***", body, evidence)
+        plain = self._record(verdict_text("PASS", evidence="token 검사 통과"), model="codex-test")
+        self.assertEqual(plain.returncode, 0, plain.stderr)
+        kept = self.result.read_text(encoding="utf-8")
+        self.assertIn("token 검사 통과", kept)
+        self.assertNotIn("***", kept)
+
+    def test_substring_keys_are_not_stored(self) -> None:
+        samples = (
+            ("mytoken=abc", "abc"),
+            ("token2=abc", "abc"),
+            ("MYPASSWORD=x", "MYPASSWORD=x"),
+            ("appSecret: y", "appSecret: y"),
+        )
+        for evidence, secret in samples:
+            with self.subTest(evidence=evidence):
+                done = self._record(
+                    verdict_text("PASS", evidence="증거 " + evidence),
+                    model=evidence,
+                )
+                self.assertEqual(done.returncode, 0, done.stderr)
+                body = self.result.read_text(encoding="utf-8")
+                log = self.log.read_text(encoding="utf-8")
+                self.assertNotIn(secret, body, evidence)
+                self.assertNotIn(secret, log, evidence)
+                self.assertIn("***", body, evidence)
+        for phrase in ("token 검사 통과", "secret 없음"):
+            with self.subTest(phrase=phrase):
+                done = self._record(verdict_text("PASS", evidence=phrase), model="codex-test")
+                self.assertEqual(done.returncode, 0, done.stderr)
+                kept = self.result.read_text(encoding="utf-8")
+                self.assertIn(phrase, kept)
+                self.assertNotIn("***", kept)
+
+    def test_record_rotates_before_the_log_cap(self) -> None:
+        old = [f"2026-11-26T00:00:00Z Codex 시작 옛{i}\n" for i in range(LOG_LINE_LIMIT)]
+        self.log.write_text("".join(old), encoding="utf-8")
+        done = self._record(verdict_text("PASS"))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        text = self.log.read_text(encoding="utf-8")
+        self.assertLessEqual(len(text.splitlines()), LOG_LINE_LIMIT)
+        self.assertIn("검증 PASS 모델 codex-test 헤드 " + EXPECT_HEAD[:7], text)
+        archive = (self.folder / "log" / "001.md").read_text(encoding="utf-8")
+        self.assertIn("옛0", archive)
+        self.assertNotIn("검증 PASS", archive)
+
+
 if __name__ == "__main__":
     unittest.main()

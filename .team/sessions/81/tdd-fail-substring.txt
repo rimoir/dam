@@ -1,0 +1,37 @@
+FFFF
+======================================================================
+FAIL: test_substring_keys_are_not_stored (__main__.VerifyRecordTest.test_substring_keys_are_not_stored) (evidence='mytoken=abc')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1721, in test_substring_keys_are_not_stored
+    self.assertNotIn(secret, body, evidence)
+AssertionError: 'abc' unexpectedly found in '# 결과 81\n\n## 결과\n\nPASS 헤드 ccccccc 모델 mytoken=abc\n\n## 증거 요약\n\n증거 mytoken=abc\n\n## 교훈 후보\n\n- 그대로\n' : mytoken=abc
+
+======================================================================
+FAIL: test_substring_keys_are_not_stored (__main__.VerifyRecordTest.test_substring_keys_are_not_stored) (evidence='token2=abc')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1721, in test_substring_keys_are_not_stored
+    self.assertNotIn(secret, body, evidence)
+AssertionError: 'abc' unexpectedly found in '# 결과 81\n\n## 결과\n\nPASS 헤드 ccccccc 모델 token2=abc\n\n## 증거 요약\n\n증거 token2=abc\n\n## 교훈 후보\n\n- 그대로\n' : token2=abc
+
+======================================================================
+FAIL: test_substring_keys_are_not_stored (__main__.VerifyRecordTest.test_substring_keys_are_not_stored) (evidence='MYPASSWORD=x')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1721, in test_substring_keys_are_not_stored
+    self.assertNotIn(secret, body, evidence)
+AssertionError: 'MYPASSWORD=x' unexpectedly found in '# 결과 81\n\n## 결과\n\nPASS 헤드 ccccccc 모델 MYPASSWORD=x\n\n## 증거 요약\n\n증거 MYPASSWORD=x\n\n## 교훈 후보\n\n- 그대로\n' : MYPASSWORD=x
+
+======================================================================
+FAIL: test_substring_keys_are_not_stored (__main__.VerifyRecordTest.test_substring_keys_are_not_stored) (evidence='appSecret: y')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1721, in test_substring_keys_are_not_stored
+    self.assertNotIn(secret, body, evidence)
+AssertionError: 'appSecret: y' unexpectedly found in '# 결과 81\n\n## 결과\n\nPASS 헤드 ccccccc 모델 appSecret: y\n\n## 증거 요약\n\n증거 appSecret: y\n\n## 교훈 후보\n\n- 그대로\n' : appSecret: y
+
+----------------------------------------------------------------------
+Ran 1 test in 0.324s
+
+FAILED (failures=4)

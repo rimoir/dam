@@ -1,0 +1,69 @@
+FFFFFFFF
+======================================================================
+FAIL: test_compound_keys_and_escaped_quotes_are_not_stored (__main__.VerifyRecordTest.test_compound_keys_and_escaped_quotes_are_not_stored) (evidence='GITHUB_TOKEN=envtoken')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1696, in test_compound_keys_and_escaped_quotes_are_not_stored
+    self.assertNotIn(secret, body, evidence)
+AssertionError: 'envtoken' unexpectedly found in '# 결과 81\n\n## 결과\n\nPASS 헤드 ccccccc 모델 GITHUB_TOKEN=envtoken\n\n## 증거 요약\n\n증거 GITHUB_TOKEN=envtoken\n\n## 교훈 후보\n\n- 그대로\n' : GITHUB_TOKEN=envtoken
+
+======================================================================
+FAIL: test_compound_keys_and_escaped_quotes_are_not_stored (__main__.VerifyRecordTest.test_compound_keys_and_escaped_quotes_are_not_stored) (evidence='DB_PASSWORD=envpass')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1696, in test_compound_keys_and_escaped_quotes_are_not_stored
+    self.assertNotIn(secret, body, evidence)
+AssertionError: 'envpass' unexpectedly found in '# 결과 81\n\n## 결과\n\nPASS 헤드 ccccccc 모델 DB_PASSWORD=envpass\n\n## 증거 요약\n\n증거 DB_PASSWORD=envpass\n\n## 교훈 후보\n\n- 그대로\n' : DB_PASSWORD=envpass
+
+======================================================================
+FAIL: test_compound_keys_and_escaped_quotes_are_not_stored (__main__.VerifyRecordTest.test_compound_keys_and_escaped_quotes_are_not_stored) (evidence='api_token=xyzvalue')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1696, in test_compound_keys_and_escaped_quotes_are_not_stored
+    self.assertNotIn(secret, body, evidence)
+AssertionError: 'xyzvalue' unexpectedly found in '# 결과 81\n\n## 결과\n\nPASS 헤드 ccccccc 모델 api_token=xyzvalue\n\n## 증거 요약\n\n증거 api_token=xyzvalue\n\n## 교훈 후보\n\n- 그대로\n' : api_token=xyzvalue
+
+======================================================================
+FAIL: test_compound_keys_and_escaped_quotes_are_not_stored (__main__.VerifyRecordTest.test_compound_keys_and_escaped_quotes_are_not_stored) (evidence='client_secret=secvalue')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1696, in test_compound_keys_and_escaped_quotes_are_not_stored
+    self.assertNotIn(secret, body, evidence)
+AssertionError: 'secvalue' unexpectedly found in '# 결과 81\n\n## 결과\n\nPASS 헤드 ccccccc 모델 client_secret=secvalue\n\n## 증거 요약\n\n증거 client_secret=secvalue\n\n## 교훈 후보\n\n- 그대로\n' : client_secret=secvalue
+
+======================================================================
+FAIL: test_compound_keys_and_escaped_quotes_are_not_stored (__main__.VerifyRecordTest.test_compound_keys_and_escaped_quotes_are_not_stored) (evidence='db_password=dbvalue')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1696, in test_compound_keys_and_escaped_quotes_are_not_stored
+    self.assertNotIn(secret, body, evidence)
+AssertionError: 'dbvalue' unexpectedly found in '# 결과 81\n\n## 결과\n\nPASS 헤드 ccccccc 모델 db_password=dbvalue\n\n## 증거 요약\n\n증거 db_password=dbvalue\n\n## 교훈 후보\n\n- 그대로\n' : db_password=dbvalue
+
+======================================================================
+FAIL: test_compound_keys_and_escaped_quotes_are_not_stored (__main__.VerifyRecordTest.test_compound_keys_and_escaped_quotes_are_not_stored) (evidence='password="a\\"b"')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1696, in test_compound_keys_and_escaped_quotes_are_not_stored
+    self.assertNotIn(secret, body, evidence)
+AssertionError: 'b"' unexpectedly found in '# 결과 81\n\n## 결과\n\nPASS 헤드 ccccccc 모델 password=***b"\n\n## 증거 요약\n\n증거 password=***b"\n\n## 교훈 후보\n\n- 그대로\n' : password="a\"b"
+
+======================================================================
+FAIL: test_compound_keys_and_escaped_quotes_are_not_stored (__main__.VerifyRecordTest.test_compound_keys_and_escaped_quotes_are_not_stored) (evidence='password="a\\"zqtail"')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1696, in test_compound_keys_and_escaped_quotes_are_not_stored
+    self.assertNotIn(secret, body, evidence)
+AssertionError: 'zqtail' unexpectedly found in '# 결과 81\n\n## 결과\n\nPASS 헤드 ccccccc 모델 password=***zqtail"\n\n## 증거 요약\n\n증거 password=***zqtail"\n\n## 교훈 후보\n\n- 그대로\n' : password="a\"zqtail"
+
+======================================================================
+FAIL: test_compound_keys_and_escaped_quotes_are_not_stored (__main__.VerifyRecordTest.test_compound_keys_and_escaped_quotes_are_not_stored) (evidence="secret='a\\'sqtail'")
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1696, in test_compound_keys_and_escaped_quotes_are_not_stored
+    self.assertNotIn(secret, body, evidence)
+AssertionError: 'sqtail' unexpectedly found in "# 결과 81\n\n## 결과\n\nPASS 헤드 ccccccc 모델 secret=***sqtail'\n\n## 증거 요약\n\n증거 secret=***sqtail'\n\n## 교훈 후보\n\n- 그대로\n" : secret='a\'sqtail'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.528s
+
+FAILED (failures=8)

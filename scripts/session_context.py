@@ -546,3 +546,53 @@ def limit_errors(root: Path, branch: str) -> list[str]:
     if len(body) > INJECT_LIMIT:
         errors.append(f"시작 주입이 {INJECT_LIMIT}자를 넘는다: {len(body)}")
     return errors
+
+
+_SHORT_SHA = 7
+
+
+def _section_span(lines: list[str], heading: str) -> tuple[int, int] | None:
+    start = None
+    for index, line in enumerate(lines):
+        if line.strip() == heading:
+            start = index
+            break
+    if start is None:
+        return None
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if lines[index].startswith("## "):
+            end = index
+            break
+    return start, end
+
+
+def verification_log_line(stamp: str, tool: str, model: str, head: str) -> str:
+    return f"{stamp} {tool} 종료 검증 PASS 모델 {model} 헤드 {head[:_SHORT_SHA]}"
+
+
+def render_recorded_result(original: str, result_line: str, evidence: str) -> str | None:
+    lines = original.splitlines()
+    result_span = _section_span(lines, "## 결과")
+    if result_span is None:
+        return None
+    start, end = result_span
+    lines = lines[: start + 1] + ["", result_line, ""] + lines[end:]
+    block = ["## 증거 요약", "", evidence, ""]
+    evidence_span = _section_span(lines, "## 증거 요약")
+    if evidence_span is None:
+        lesson = _section_span(lines, "## 교훈 후보")
+        if lesson is None:
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines.extend(block)
+        else:
+            at = lesson[0]
+            lines = lines[:at] + block + lines[at:]
+    else:
+        es, ee = evidence_span
+        lines = lines[:es] + block + lines[ee:]
+    text = "\n".join(lines)
+    if not text.endswith("\n"):
+        text += "\n"
+    return text

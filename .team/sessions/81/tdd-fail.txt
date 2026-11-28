@@ -1,0 +1,65 @@
+FFFFF
+======================================================================
+FAIL: test_bad_tool_does_not_write (__main__.VerifyRecordTest.test_bad_tool_does_not_write)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1635, in test_bad_tool_does_not_write
+    self.assertEqual(done.stdout, "실패\n")
+AssertionError: '' != '실패\n'
++ 실패
+
+
+======================================================================
+FAIL: test_issues_blocked_and_malformed_leave_files_unchanged (__main__.VerifyRecordTest.test_issues_blocked_and_malformed_leave_files_unchanged)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1626, in test_issues_blocked_and_malformed_leave_files_unchanged
+    self.assertEqual(done.stdout, expected, text)
+AssertionError: '' != 'ISSUES\n'
++ ISSUES
+ : ISSUES
+헤드 SHA: cccccccccccccccccccccccccccccccccccccccc
+확인 방법: python3 scripts/session_context_test.py
+증거 요약: 실패 1개
+
+
+======================================================================
+FAIL: test_passed_verdict_lands_in_result_and_log (__main__.VerifyRecordTest.test_passed_verdict_lands_in_result_and_log)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1598, in test_passed_verdict_lands_in_result_and_log
+    self.assertEqual(done.returncode, 0, done.stderr)
+AssertionError: 2 != 0 : usage: team-session.py [-h]
+                       {new,summary,start-context,verify-session,pull,board,rotate,check,mode,code-clean,verify-judge,verify-readonly,plan-check,resume}
+                       ...
+team-session.py: error: argument command: invalid choice: 'verify-record' (choose from 'new', 'summary', 'start-context', 'verify-session', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')
+
+
+======================================================================
+FAIL: test_record_rotates_before_the_log_cap (__main__.VerifyRecordTest.test_record_rotates_before_the_log_cap)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1654, in test_record_rotates_before_the_log_cap
+    self.assertEqual(done.returncode, 0, done.stderr)
+AssertionError: 2 != 0 : usage: team-session.py [-h]
+                       {new,summary,start-context,verify-session,pull,board,rotate,check,mode,code-clean,verify-judge,verify-readonly,plan-check,resume}
+                       ...
+team-session.py: error: argument command: invalid choice: 'verify-record' (choose from 'new', 'summary', 'start-context', 'verify-session', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')
+
+
+======================================================================
+FAIL: test_token_is_not_stored (__main__.VerifyRecordTest.test_token_is_not_stored)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/agent/repos/dam/scripts/session_context_test.py", line 1643, in test_token_is_not_stored
+    self.assertEqual(done.returncode, 0, done.stderr)
+AssertionError: 2 != 0 : usage: team-session.py [-h]
+                       {new,summary,start-context,verify-session,pull,board,rotate,check,mode,code-clean,verify-judge,verify-readonly,plan-check,resume}
+                       ...
+team-session.py: error: argument command: invalid choice: 'verify-record' (choose from 'new', 'summary', 'start-context', 'verify-session', 'pull', 'board', 'rotate', 'check', 'mode', 'code-clean', 'verify-judge', 'verify-readonly', 'plan-check', 'resume')
+
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.295s
+
+FAILED (failures=5)

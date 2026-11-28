@@ -1,0 +1,28 @@
+HEAD 6ce4e3dcda7f378893f0640e99feed10573ec4a0
+BASE 88f94de7676340055ff9061c3fbeeb06308a1a18
+===== verify-session =====
+완료 기준
+검증 결과가 그 작업의 result.md와, 검증한 도구와 모델이 적힌 log.md 한 줄에 남는다
+BASE
+88f94de7676340055ff9061c3fbeeb06308a1a18
+HEAD
+6ce4e3dcda7f378893f0640e99feed10573ec4a0
+검사 명령
+python3 scripts/session_context_test.py
+
+---ENV---
+HOME=/mnt/copy/empty-home
+TMPDIR=/tmp
+PATH=/usr/bin:/bin
+PWD=/mnt/copy
+SESSION_EXIT:0
+===== verify-readonly =====
+BEGIN:6bf45ab02f4683564dc3963a27ad93223a55c6dfdf72834ff94cf38e894b7689
+깨끗
+READONLY_EXIT:0
+===== verify-judge =====
+PASS
+JUDGE_EXIT:0
+===== verify-record =====
+남김
+RECORD_EXIT:0
